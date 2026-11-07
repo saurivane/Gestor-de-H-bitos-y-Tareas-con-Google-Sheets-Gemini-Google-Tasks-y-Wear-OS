@@ -19,7 +19,7 @@ const CONFIG = {
   FRECUENCIAS: ['Diaria', 'L-V', 'Fin de semana', 'Semanal'],
   ESTADOS: ['Pendiente', 'Completado'],
   TASKS_LIST_NAME: 'Hábitos',
-  GEMINI_MODEL: 'gemini-2.5-flash',
+  GEMINI_MODEL: 'gemini-3.8-flash',
   TIMEZONE: Session.getScriptTimeZone() || 'Europe/Madrid'
 };
 
@@ -150,7 +150,7 @@ function actualizarKpiMensualEnSheetManual() {
 }
 
 /**
- * 2. INTEGRACIÓN NLU CON GEMINI API (gemini-2.5-flash)
+ * 2. INTEGRACIÓN NLU CON GEMINI API
  */
 function procesarOrdenGemini(textoUsuario) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
