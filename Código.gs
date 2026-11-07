@@ -1,0 +1,1899 @@
+/**
+ * ============================================================================
+ * GESTOR DE TAREAS Y HÁBITOS - BACKEND, SYNC TASKS + WEB APP CON CRUD COMPLETO
+ * ============================================================================
+ * Pestañas requeridas en Google Sheets:
+ * 1. "Plantillas_Habitos" : [ID, Nombre, Categoría, Frecuencia, Hora/Momento, Activo]
+ * 2. "Registro_Diario"    : [Fecha, Tipo, Nombre, Categoría, Estado, Timestamp_Completado]
+ * 3. "Dashboard"          : Panel de métricas y KPIs.
+ * ============================================================================
+ */
+
+const CONFIG = {
+  SHEETS: {
+    PLANTILLAS: 'Plantillas_Habitos',
+    REGISTRO: 'Registro_Diario',
+    DASHBOARD: 'Dashboard'
+  },
+  TASKS_LIST_NAME: 'Hábitos',
+  GEMINI_MODEL: 'gemini-2.5-flash',
+  TIMEZONE: Session.getScriptTimeZone() || 'Europe/Madrid'
+};
+
+/**
+ * 1. CONFIGURACIÓN Y UI EN SHEETS (onOpen)
+ */
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('⚡ Mi Gestor')
+    .addItem('🗣️ Entrada rápida por comando (IA)', 'mostrarDialogoComando')
+    .addSeparator()
+    .addItem('🔄 1. Volcar hábitos de hoy (+ Enviar a Google Tasks)', 'generarHabitosDelDiaManual')
+    .addItem('🔃 2. Sincronizar con Google Tasks ("Hábitos") ahora', 'sincronizarGoogleTasksManual')
+    .addSeparator()
+    .addItem('⏰ Activar automatización total (00:05 + Sync cada 5 min)', 'instalarTriggersAutomaticos')
+    .addItem('🔑 Configurar Gemini API Key', 'configurarApiKey')
+    .addToUi();
+}
+
+function configurarApiKey() {
+  const ui = SpreadsheetApp.getUi();
+  const res = ui.prompt(
+    'Configurar Gemini API Key',
+    'Introduce tu API Key de Google AI Studio (AIzaSy...):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (res.getSelectedButton() === ui.Button.OK) {
+    const key = res.getResponseText().trim();
+    if (key) {
+      PropertiesService.getScriptProperties().setProperty('GEMINI_API_KEY', key);
+      ui.alert('✅ API Key guardada correctamente en las propiedades del script.');
+    } else {
+      ui.alert('⚠️ La API Key no puede estar vacía.');
+    }
+  }
+}
+
+function mostrarDialogoComando() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt(
+    '⚡ Entrada rápida con IA (Gemini)',
+    'Escribe tu comando en lenguaje natural (ej. "He terminado de entrenar", "Añadir hábito 20 min diario audio italiano", "Añadir tarea pagar factura"):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const textoUsuario = response.getResponseText().trim();
+  if (!textoUsuario) {
+    ui.alert('⚠️ Por favor, escribe una orden válida.');
+    return;
+  }
+
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast('Analizando con Gemini...', '⏳ Procesando', 5);
+    const ordenJson = procesarOrdenGemini(textoUsuario);
+    const resultado = ejecutarAccion(ordenJson);
+
+    ui.alert(
+      '✅ Resultado de la operación',
+      `Interpretación IA:\n• Acción: ${ordenJson.accion}\n• Tipo: ${ordenJson.tipo}\n• Nombre: ${ordenJson.nombre}\n• Categoría: ${ordenJson.categoria}\n\nRespuesta:\n${resultado.mensaje}`,
+      ui.ButtonSet.OK
+    );
+  } catch (error) {
+    ui.alert('❌ Error al procesar la orden', error.message, ui.ButtonSet.OK);
+  }
+}
+
+function generarHabitosDelDiaManual() {
+  try {
+    const res = generarHabitosDelDia();
+    SpreadsheetApp.getUi().alert('✅ Volcado y Envío a Google Tasks completado', res.mensaje, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert('❌ Error en el volcado', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
+function sincronizarGoogleTasksManual() {
+  try {
+    const res = sincronizarBuzonGoogleTasks();
+    SpreadsheetApp.getUi().alert('🔃 Sincronización Bidireccional (Google Tasks)', res.mensaje, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(
+      '⚠️ Falta activar el servicio Google Tasks API',
+      `Detalle: ${error.message}\n\nPara activarlo en 10 segundos:\n1. En el editor de Apps Script, mira la barra izquierda y haz clic en el símbolo "+" junto a "Servicios".\n2. Busca "Google Tasks API", selecciónalo y pulsa "Añadir".`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * 2. INTEGRACIÓN NLU CON GEMINI API (gemini-2.5-flash)
+ */
+function procesarOrdenGemini(textoUsuario) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) {
+    throw new Error('No se ha configurado GEMINI_API_KEY. Usa el menú "⚡ Mi Gestor > Configurar Gemini API Key".');
+  }
+
+  const itemsHoy = obtenerNombresRegistradosHoy_();
+  const contextoHoy = itemsHoy.length > 0
+    ? `Elementos ya registrados hoy en la hoja: [${itemsHoy.join(', ')}]. Si el usuario se refiere a alguno de estos para completarlo o borrarlo, utiliza EXACTAMENTE ese mismo nombre.`
+    : 'Aún no hay elementos registrados hoy.';
+
+  const systemInstructionText = `Eres el motor NLU de un sistema de gestión de hábitos y tareas personales.
+Analiza la orden del usuario y devuélvela estrictamente en formato JSON cumpliendo este esquema:
+{
+  "accion": "CREAR" | "COMPLETAR" | "BORRAR" | "CONSULTAR",
+  "tipo": "Hábito" | "Tarea",
+  "nombre": "nombre limpio y conciso en infinitivo o sustantivo (con primera letra en mayúscula)",
+  "categoria": "Salud" | "Estudio" | "Hogar" | "Mantenimiento" | "Finanzas" | "General",
+  "frecuencia": "Diaria" | "L-V" | "Fin de semana" | "Semanal"
+}
+
+Reglas de negocio:
+1. "accion":
+   - "COMPLETAR": cuando el usuario indica que ya hizo, terminó o cumplió algo (ej. "ya entrené", "hecho leer", "completado meditación", "terminado audio italiano").
+   - "CREAR": cuando quiere agendar, recordar o añadir un hábito o tarea nueva (ej. "20 minutos diario audio italiano", "comprar leche", "tengo que estudiar inglés").
+   - "BORRAR": cuando quiere eliminar, cancelar o quitar un registro (ej. "borra comprar leche", "quita entrenar de hoy").
+   - "CONSULTAR": cuando pregunta por su estado o resumen.
+2. "tipo":
+   - "Hábito": acciones recurrentes de desarrollo personal, idiomas, salud, lectura, deporte, rutinas o si menciona palabras como "diario", "todos los días", "hábito", "semanal".
+   - "Tarea": acciones puntuales, recados, compras, pagos o trámites.
+3. "nombre": limpia palabras de comando ("hecho", "completado", "añade") o frecuencias ("diario", "todos los días"). Si coincide semánticamente con uno de los elementos registrados hoy, usa EXACTAMENTE el nombre de la lista de hoy.
+4. "categoria": clasifica semánticamente en una de las 6 categorías permitidas ("Salud", "Estudio", "Hogar", "Mantenimiento", "Finanzas", "General").
+5. ${contextoHoy}`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
+
+  const payload = {
+    systemInstruction: {
+      parts: [{ text: systemInstructionText }]
+    },
+    contents: [
+      {
+        role: 'user',
+        parts: [{ text: textoUsuario }]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          accion: {
+            type: 'STRING',
+            enum: ['CREAR', 'COMPLETAR', 'BORRAR', 'CONSULTAR']
+          },
+          tipo: {
+            type: 'STRING',
+            enum: ['Hábito', 'Tarea']
+          },
+          nombre: {
+            type: 'STRING'
+          },
+          categoria: {
+            type: 'STRING',
+            enum: ['Salud', 'Estudio', 'Hogar', 'Mantenimiento', 'Finanzas', 'General']
+          },
+          frecuencia: {
+            type: 'STRING',
+            enum: ['Diaria', 'L-V', 'Fin de semana', 'Semanal']
+          }
+        },
+        required: ['accion', 'tipo', 'nombre', 'categoria']
+      }
+    }
+  };
+
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const statusCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (statusCode !== 200) {
+    throw new Error(`Error Gemini API (HTTP ${statusCode}): ${responseText}`);
+  }
+
+  const jsonResponse = JSON.parse(responseText);
+  const rawContent = jsonResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (!rawContent) {
+    throw new Error('Gemini no devolvió un contenido JSON válido.');
+  }
+
+  return JSON.parse(rawContent);
+}
+
+/**
+ * 3. LÓGICA DE MANIPULACIÓN EN REGISTRO_DIARIO Y PLANTILLAS (CRUD COMPLETO)
+ */
+function ejecutarAccion(orden, opciones) {
+  const opts = opciones || {};
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = obtenerHojaFlexible_(ss, CONFIG.SHEETS.REGISTRO);
+    const sheetPlantillas = obtenerHojaFlexible_(ss, CONFIG.SHEETS.PLANTILLAS);
+    if (!sheet) throw new Error(`No existe la pestaña "${CONFIG.SHEETS.REGISTRO}".`);
+
+    const hoyStr = obtenerFechaHoyStr_();
+    const ahoraTimestamp = Utilities.formatDate(new Date(), CONFIG.TIMEZONE, 'yyyy-MM-dd HH:mm:ss');
+
+    const accion = (orden.accion || '').toUpperCase();
+    const tipo = orden.tipo || 'Tarea';
+    const nombre = (orden.nombre || '').trim();
+    const categoria = orden.categoria || 'General';
+    const frecuencia = orden.frecuencia || 'Diaria';
+    const horaMomento = orden.horaMomento || 'Cualquier momento';
+    const guardarEnPlantilla = orden.guardarEnPlantilla !== false; // Por defecto true si es Hábito
+    const nombreNorm = normalizarTexto_(nombre);
+
+    const data = sheet.getDataRange().getValues();
+    let mensaje = '';
+    let filaAfectada = null;
+
+    if (accion === 'COMPLETAR') {
+      let encontradoHoyIndex = -1;
+
+      if (orden.idFila && orden.idFila > 1 && orden.idFila <= data.length) {
+        encontradoHoyIndex = Number(orden.idFila);
+      } else {
+        for (let i = data.length - 1; i >= 1; i--) {
+          const fechaFila = formatearCeldaFecha_(data[i][0]);
+          const nombreFilaNorm = normalizarTexto_(String(data[i][2]));
+
+          if (fechaFila === hoyStr && (nombreFilaNorm === nombreNorm || nombreFilaNorm.includes(nombreNorm) || nombreNorm.includes(nombreFilaNorm))) {
+            encontradoHoyIndex = i + 1;
+            break;
+          }
+        }
+      }
+
+      let nombreReal = nombre;
+      if (encontradoHoyIndex !== -1) {
+        nombreReal = String(sheet.getRange(encontradoHoyIndex, 3).getValue());
+        sheet.getRange(encontradoHoyIndex, 5, 1, 2).setValues([['Completado', ahoraTimestamp]]);
+        filaAfectada = encontradoHoyIndex;
+        mensaje = `✅ "${nombreReal}" marcado como Completado.`;
+      } else {
+        sheet.appendRow([hoyStr, tipo, nombre, categoria, 'Completado', ahoraTimestamp]);
+        filaAfectada = sheet.getLastRow();
+        mensaje = `✅ Añadido y completado hoy: "${nombre}" (${categoria}).`;
+      }
+
+      if (!opts.omitirSyncTasks) {
+        marcarCompletadaEnGoogleTasks_(nombreReal);
+      }
+    }
+
+    else if (accion === 'REABRIR') {
+      let encontradoIndex = -1;
+      if (orden.idFila && orden.idFila > 1 && orden.idFila <= data.length) {
+        encontradoIndex = Number(orden.idFila);
+      } else {
+        for (let i = data.length - 1; i >= 1; i--) {
+          const fechaFila = formatearCeldaFecha_(data[i][0]);
+          const nombreFilaNorm = normalizarTexto_(String(data[i][2]));
+          if (fechaFila === hoyStr && (nombreFilaNorm === nombreNorm || nombreFilaNorm.includes(nombreNorm))) {
+            encontradoIndex = i + 1;
+            break;
+          }
+        }
+      }
+      if (encontradoIndex !== -1) {
+        const nombreReal = String(sheet.getRange(encontradoIndex, 3).getValue());
+        sheet.getRange(encontradoIndex, 5, 1, 2).setValues([['Pendiente', '']]);
+        filaAfectada = encontradoIndex;
+        mensaje = `↩️ "${nombreReal}" reabierto como Pendiente.`;
+        if (!opts.omitirSyncTasks) {
+          asegurarPendienteEnGoogleTasks_(nombreReal, tipo, categoria);
+        }
+      } else {
+        mensaje = `⚠️ No se encontró el elemento para reabrir.`;
+      }
+    }
+
+    else if (accion === 'CREAR') {
+      let existeHoy = false;
+      for (let i = data.length - 1; i >= 1; i--) {
+        if (formatearCeldaFecha_(data[i][0]) === hoyStr && normalizarTexto_(String(data[i][2])) === nombreNorm) {
+          existeHoy = true;
+          filaAfectada = i + 1;
+          break;
+        }
+      }
+
+      // Si es un Hábito y el día de hoy le aplica según su frecuencia (o se pidió explícitamente para hoy), lo insertamos en Registro_Diario
+      const aplicaHoy = tipo === 'Tarea' || correspondeFrecuenciaHoy_(frecuencia, new Date().getDay()) || orden.forzarHoy === true;
+      if (!existeHoy && aplicaHoy) {
+        sheet.appendRow([hoyStr, tipo, nombre, categoria, 'Pendiente', '']);
+        filaAfectada = sheet.getLastRow();
+        if (!opts.omitirSyncTasks) {
+          asegurarPendienteEnGoogleTasks_(nombre, tipo, categoria);
+        }
+      }
+
+      if (tipo === 'Hábito' && guardarEnPlantilla && sheetPlantillas) {
+        asegurarEnPlantillasHabitos_(sheetPlantillas, nombre, categoria, frecuencia, horaMomento);
+      }
+
+      mensaje = tipo === 'Hábito'
+        ? `📌 Hábito "${nombre}" guardado en Plantillas (${frecuencia}) y añadido a hoy.`
+        : `📌 Tarea "${nombre}" (${categoria}) añadida para hoy.`;
+    }
+
+    else if (accion === 'EDITAR_HOY') {
+      const idFila = Number(orden.idFila);
+      if (!idFila || idFila < 2 || idFila > data.length) {
+        throw new Error('Fila inválida para editar.');
+      }
+      const nombreAnterior = String(sheet.getRange(idFila, 3).getValue());
+      sheet.getRange(idFila, 2, 1, 3).setValues([[tipo, nombre, categoria]]);
+      filaAfectada = idFila;
+
+      if (!opts.omitirSyncTasks && normalizarTexto_(nombreAnterior) !== nombreNorm) {
+        eliminarDeGoogleTasks_(nombreAnterior);
+        const estadoActual = String(sheet.getRange(idFila, 5).getValue());
+        if (estadoActual.toLowerCase() === 'pendiente') {
+          asegurarPendienteEnGoogleTasks_(nombre, tipo, categoria);
+        }
+      }
+      mensaje = `✏️ Actualizado: "${nombre}" (${categoria}).`;
+    }
+
+    else if (accion === 'BORRAR') {
+      let filaABorrar = -1;
+
+      if (orden.idFila && orden.idFila > 1 && orden.idFila <= data.length) {
+        filaABorrar = Number(orden.idFila);
+      } else {
+        for (let i = data.length - 1; i >= 1; i--) {
+          const fechaFila = formatearCeldaFecha_(data[i][0]);
+          const nombreFilaNorm = normalizarTexto_(String(data[i][2]));
+
+          if (fechaFila === hoyStr && (nombreFilaNorm === nombreNorm || nombreFilaNorm.includes(nombreNorm))) {
+            filaABorrar = i + 1;
+            break;
+          }
+        }
+      }
+
+      if (filaABorrar !== -1) {
+        const nombreBorrado = String(sheet.getRange(filaABorrar, 3).getValue());
+        sheet.deleteRow(filaABorrar);
+        filaAfectada = filaABorrar;
+        if (!opts.omitirSyncTasks) {
+          eliminarDeGoogleTasks_(nombreBorrado);
+        }
+        mensaje = `🗑️ Eliminado de hoy: "${nombreBorrado}".`;
+      } else {
+        mensaje = `⚠️ No se encontró "${nombre}" para borrar.`;
+      }
+    }
+
+    else if (accion === 'CONSULTAR') {
+      const resumen = obtenerEstadoDashboard();
+      mensaje = `📊 Hoy llevas ${resumen.hoy.completados}/${resumen.hoy.total} (${resumen.hoy.porcentajeCumplimiento}%). Pendientes: ${resumen.hoy.pendientes.map(p => p.nombre).join(', ') || '¡Ninguno!'}`;
+    }
+
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      accionEjecutada: accion,
+      ordenInterpretada: orden,
+      filaAfectada: filaAfectada,
+      mensaje: mensaje,
+      dashboard: obtenerEstadoDashboard()
+    };
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * CRUD ESPECÍFICO SOBRE LA PESTAÑA "Plantillas_Habitos"
+ * Columnas: [0: ID, 1: Nombre, 2: Categoría, 3: Frecuencia, 4: Hora/Momento, 5: Activo]
+ */
+function gestionarPlantillaHabito(operacion) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetPlantillas = obtenerHojaFlexible_(ss, CONFIG.SHEETS.PLANTILLAS);
+    const sheetRegistro = obtenerHojaFlexible_(ss, CONFIG.SHEETS.REGISTRO);
+    if (!sheetPlantillas) throw new Error('No existe la pestaña Plantillas_Habitos.');
+
+    const modo = (operacion.modo || '').toUpperCase();
+    const idFila = Number(operacion.idFila);
+    const nombre = (operacion.nombre || '').trim();
+    const categoria = (operacion.categoria || 'General').trim();
+    const frecuencia = (operacion.frecuencia || 'Diaria').trim();
+    const horaMomento = (operacion.horaMomento || 'Cualquier momento').trim();
+    const activo = operacion.activo !== undefined ? Boolean(operacion.activo) : true;
+
+    let mensaje = '';
+
+    if (modo === 'CREAR_PLANTILLA') {
+      if (!nombre) throw new Error('El nombre del hábito no puede estar vacío.');
+      asegurarEnPlantillasHabitos_(sheetPlantillas, nombre, categoria, frecuencia, horaMomento);
+      if (activo && correspondeFrecuenciaHoy_(frecuencia, new Date().getDay())) {
+        ejecutarAccion({
+          accion: 'CREAR',
+          tipo: 'Hábito',
+          nombre: nombre,
+          categoria: categoria,
+          frecuencia: frecuencia,
+          guardarEnPlantilla: false,
+          forzarHoy: true
+        });
+      }
+      mensaje = `✅ Hábito "${nombre}" creado en el catálogo (${frecuencia}).`;
+    }
+
+    else if (modo === 'EDITAR_PLANTILLA') {
+      if (!idFila || idFila < 2 || idFila > sheetPlantillas.getLastRow()) {
+        throw new Error('Fila de plantilla no válida.');
+      }
+      const nombreAntiguo = String(sheetPlantillas.getRange(idFila, 2).getValue());
+      sheetPlantillas.getRange(idFila, 2, 1, 5).setValues([[nombre, categoria, frecuencia, horaMomento, activo]]);
+
+      // Si cambió el nombre o categoría, actualizamos también el registro de hoy si existía
+      if (sheetRegistro) {
+        const hoyStr = obtenerFechaHoyStr_();
+        const regData = sheetRegistro.getDataRange().getValues();
+        const normAntiguo = normalizarTexto_(nombreAntiguo);
+        for (let i = regData.length - 1; i >= 1; i--) {
+          if (formatearCeldaFecha_(regData[i][0]) === hoyStr && normalizarTexto_(String(regData[i][2])) === normAntiguo) {
+            sheetRegistro.getRange(i + 1, 3, 1, 2).setValues([[nombre, categoria]]);
+            if (normalizarTexto_(nombre) !== normAntiguo) {
+              eliminarDeGoogleTasks_(nombreAntiguo);
+              if (String(regData[i][4]).toLowerCase() === 'pendiente') {
+                asegurarPendienteEnGoogleTasks_(nombre, 'Hábito', categoria);
+              }
+            }
+            break;
+          }
+        }
+      }
+      mensaje = `✏️ Plantilla "${nombre}" actualizada correctamente.`;
+    }
+
+    else if (modo === 'TOGGLE_ACTIVO') {
+      if (!idFila || idFila < 2 || idFila > sheetPlantillas.getLastRow()) {
+        throw new Error('Fila de plantilla no válida.');
+      }
+      const nombreHab = String(sheetPlantillas.getRange(idFila, 2).getValue());
+      sheetPlantillas.getRange(idFila, 6).setValue(activo);
+      mensaje = activo
+        ? `🟢 Hábito "${nombreHab}" activado.`
+        : `⏸️ Hábito "${nombreHab}" pausado (no se volcará cada noche).`;
+    }
+
+    else if (modo === 'BORRAR_PLANTILLA') {
+      if (!idFila || idFila < 2 || idFila > sheetPlantillas.getLastRow()) {
+        throw new Error('Fila de plantilla no válida.');
+      }
+      const nombreBorrado = String(sheetPlantillas.getRange(idFila, 2).getValue());
+      sheetPlantillas.deleteRow(idFila);
+
+      // Si también pidió borrarlo de hoy:
+      if (operacion.borrarDeHoy && sheetRegistro) {
+        const hoyStr = obtenerFechaHoyStr_();
+        const regData = sheetRegistro.getDataRange().getValues();
+        const normBorr = normalizarTexto_(nombreBorrado);
+        for (let i = regData.length - 1; i >= 1; i--) {
+          if (formatearCeldaFecha_(regData[i][0]) === hoyStr && normalizarTexto_(String(regData[i][2])) === normBorr) {
+            sheetRegistro.deleteRow(i + 1);
+            break;
+          }
+        }
+        eliminarDeGoogleTasks_(nombreBorrado);
+      }
+      mensaje = `🗑️ Hábito "${nombreBorrado}" eliminado del catálogo.`;
+    }
+
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      mensaje: mensaje,
+      dashboard: obtenerEstadoDashboard()
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * 4. MOTOR BIDIRECCIONAL CON GOOGLE TASKS (LISTA "Hábitos")
+ */
+function sincronizarBuzonGoogleTasks() {
+  if (typeof Tasks === 'undefined') {
+    throw new Error('El servicio avanzado "Google Tasks API" no está habilitado en Apps Script.');
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetRegistro = ss.getSheetByName(CONFIG.SHEETS.REGISTRO);
+  if (!sheetRegistro) throw new Error('No se encontró la hoja Registro_Diario.');
+
+  const hoyStr = obtenerFechaHoyStr_();
+  const listaHabitos = obtenerOCrearListaHabitosTasks_();
+  const targetListId = listaHabitos.id;
+
+  const dataSheet = sheetRegistro.getDataRange().getValues();
+  const itemsHoySheet = [];
+
+  for (let i = 1; i < dataSheet.length; i++) {
+    if (formatearCeldaFecha_(dataSheet[i][0]) === hoyStr) {
+      const nombre = String(dataSheet[i][2] || '').trim();
+      if (!nombre) continue;
+      itemsHoySheet.push({
+        indexFila: i + 1,
+        tipo: String(dataSheet[i][1] || 'Hábito'),
+        nombre: nombre,
+        nombreNorm: normalizarTexto_(nombre),
+        categoria: String(dataSheet[i][3] || 'General'),
+        estado: String(dataSheet[i][4] || 'Pendiente')
+      });
+    }
+  }
+
+  function buscarCoincidenciaEnSheet(tituloNorm) {
+    if (!tituloNorm) return null;
+    let exacto = itemsHoySheet.find(it => it.nombreNorm === tituloNorm);
+    if (exacto) return exacto;
+    let parcial = itemsHoySheet.find(it =>
+      it.nombreNorm.includes(tituloNorm) || tituloNorm.includes(it.nombreNorm)
+    );
+    if (parcial) return parcial;
+    const palabrasTask = tituloNorm.split(/\s+/).filter(p => p.length >= 4 && !['para', 'como', 'este', 'esta', 'todo', 'todos', 'diario', 'diaria', 'minutos', 'hora'].includes(p));
+    if (palabrasTask.length > 0) {
+      return itemsHoySheet.find(it => palabrasTask.some(p => it.nombreNorm.includes(p)));
+    }
+    return null;
+  }
+
+  const listasARevisar = [{ id: targetListId, esPrincipalHabitos: true }];
+  try {
+    const defaultList = Tasks.Tasklists.get('@default');
+    if (defaultList && defaultList.id !== targetListId) {
+      listasARevisar.push({ id: defaultList.id, esPrincipalHabitos: false });
+    }
+  } catch (e) {}
+
+  const detallesCambios = [];
+  const nombresEnTasksPendientesHoy = new Set();
+  const ahoraTimestamp = Utilities.formatDate(new Date(), CONFIG.TIMEZONE, 'yyyy-MM-dd HH:mm:ss');
+
+  for (let l = 0; l < listasARevisar.length; l++) {
+    const infoLista = listasARevisar[l];
+    const tasksRes = Tasks.Tasks.list(infoLista.id, {
+      showCompleted: true,
+      showHidden: true,
+      maxResults: 100
+    });
+    const tasksItems = tasksRes.items || [];
+
+    for (let i = 0; i < tasksItems.length; i++) {
+      const t = tasksItems[i];
+      const titulo = (t.title || '').trim();
+      if (!titulo) continue;
+
+      const tituloNorm = normalizarTexto_(titulo);
+      const estaCompletadaEnTasks = (t.status === 'completed' || Boolean(t.completed));
+
+      let fechaCompletadoTaskStr = '';
+      if (t.completed) {
+        fechaCompletadoTaskStr = Utilities.formatDate(new Date(t.completed), CONFIG.TIMEZONE, 'yyyy-MM-dd');
+      }
+      const completadaHoyEnTasks = estaCompletadaEnTasks && (fechaCompletadoTaskStr === hoyStr);
+      const completadaEnDiaAnterior = estaCompletadaEnTasks && (fechaCompletadoTaskStr !== '' && fechaCompletadoTaskStr !== hoyStr);
+
+      const itemSheet = buscarCoincidenciaEnSheet(tituloNorm);
+
+      if (completadaEnDiaAnterior) {
+        if (infoLista.esPrincipalHabitos || itemSheet) {
+          try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+        }
+        continue;
+      }
+
+      if (!infoLista.esPrincipalHabitos) {
+        if (itemSheet && completadaHoyEnTasks) {
+          if (itemSheet.estado.toLowerCase() !== 'completado') {
+            sheetRegistro.getRange(itemSheet.indexFila, 5, 1, 2).setValues([['Completado', ahoraTimestamp]]);
+            itemSheet.estado = 'Completado';
+            detallesCambios.push(`✅ Completado hoy (detectado en lista secundaria): "${itemSheet.nombre}"`);
+          }
+          try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+        }
+        continue;
+      }
+
+      if (itemSheet) {
+        if (completadaHoyEnTasks) {
+          if (itemSheet.estado.toLowerCase() !== 'completado') {
+            sheetRegistro.getRange(itemSheet.indexFila, 5, 1, 2).setValues([['Completado', ahoraTimestamp]]);
+            itemSheet.estado = 'Completado';
+            detallesCambios.push(`✅ Completado en Google Sheets: "${itemSheet.nombre}"`);
+          }
+          try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+        } else if (!estaCompletadaEnTasks) {
+          if (itemSheet.estado.toLowerCase() === 'completado') {
+            try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+          } else {
+            nombresEnTasksPendientesHoy.add(itemSheet.nombreNorm);
+          }
+        }
+      } else {
+        try {
+          const textoParaGemini = estaCompletadaEnTasks ? `Completado: ${titulo}` : titulo;
+          const orden = procesarOrdenGemini(textoParaGemini);
+          const resAccion = ejecutarAccion(orden, { omitirSyncTasks: true });
+          detallesCambios.push(`🤖 IA ("${titulo}") → ${resAccion.mensaje}`);
+
+          try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+
+          if (orden.accion === 'CREAR') {
+            itemsHoySheet.push({
+              indexFila: resAccion.filaAfectada,
+              tipo: orden.tipo,
+              nombre: orden.nombre,
+              nombreNorm: normalizarTexto_(orden.nombre),
+              categoria: orden.categoria,
+              estado: 'Pendiente'
+            });
+          }
+        } catch (err) {
+          Logger.log(`Error interpretando tarea "${titulo}": ${err.message}`);
+        }
+      }
+    }
+  }
+
+  let publicadosEnTasks = 0;
+  itemsHoySheet.forEach(itemSheet => {
+    if (itemSheet.estado.toLowerCase() === 'pendiente' && !nombresEnTasksPendientesHoy.has(itemSheet.nombreNorm)) {
+      try {
+        Tasks.Tasks.insert(
+          {
+            title: itemSheet.nombre,
+            notes: `[${itemSheet.tipo} · ${itemSheet.categoria}] (${hoyStr})`
+          },
+          targetListId
+        );
+        publicadosEnTasks++;
+      } catch (e) {
+        Logger.log(`Error insertando en Tasks "${itemSheet.nombre}": ${e.message}`);
+      }
+    }
+  });
+
+  if (publicadosEnTasks > 0) {
+    detallesCambios.push(`📤 ${publicadosEnTasks} hábitos pendientes enviados a la lista "${listaHabitos.title}" de Google Tasks.`);
+  }
+
+  SpreadsheetApp.flush();
+
+  return {
+    ok: true,
+    cambios: detallesCambios.length,
+    mensaje: detallesCambios.length > 0
+      ? detallesCambios.join('\n')
+      : `Sincronización verificada en lista "${listaHabitos.title}" (${itemsHoySheet.length} hábitos hoy en hoja). No se detectaron cambios nuevos.`
+  };
+}
+
+/**
+ * 5. AUTOMATIZACIÓN Y RECURRENCIA NOCTURNA (generarHabitosDelDia)
+ */
+function generarHabitosDelDia() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheetPlantillas = ss.getSheetByName(CONFIG.SHEETS.PLANTILLAS);
+    const sheetRegistro = ss.getSheetByName(CONFIG.SHEETS.REGISTRO);
+
+    if (!sheetPlantillas || !sheetRegistro) {
+      throw new Error('Faltan las pestañas requeridas ("Plantillas_Habitos" o "Registro_Diario").');
+    }
+
+    const hoy = new Date();
+    const hoyStr = obtenerFechaHoyStr_(hoy);
+    const diaSemana = hoy.getDay();
+
+    const datosRegistro = sheetRegistro.getDataRange().getValues();
+    const existentesHoy = new Set();
+
+    for (let i = 1; i < datosRegistro.length; i++) {
+      const fechaFila = formatearCeldaFecha_(datosRegistro[i][0]);
+      const nombreFila = normalizarTexto_(String(datosRegistro[i][2]));
+      if (fechaFila === hoyStr && nombreFila) {
+        existentesHoy.add(nombreFila);
+      }
+    }
+
+    const datosPlantillas = sheetPlantillas.getDataRange().getValues();
+    const nuevasFilas = [];
+
+    for (let i = 1; i < datosPlantillas.length; i++) {
+      const fila = datosPlantillas[i];
+      const nombreHabito = String(fila[1] || '').trim();
+      const categoria = String(fila[2] || 'General').trim();
+      const frecuencia = String(fila[3] || 'Diaria').trim();
+      const activoRaw = fila[5];
+
+      if (!nombreHabito) continue;
+
+      const estaActivo =
+        activoRaw === true ||
+         ['si', 'sí', 'true', '1', 'activo', 'x'].includes(String(activoRaw).trim().toLowerCase());
+
+      if (!estaActivo) continue;
+
+      if (correspondeFrecuenciaHoy_(frecuencia, diaSemana)) {
+        const nombreNorm = normalizarTexto_(nombreHabito);
+        if (!existentesHoy.has(nombreNorm)) {
+          nuevasFilas.push([hoyStr, 'Hábito', nombreHabito, categoria, 'Pendiente', '']);
+          existentesHoy.add(nombreNorm);
+        }
+      }
+    }
+
+    if (nuevasFilas.length > 0) {
+      const ultimaFila = sheetRegistro.getLastRow();
+      sheetRegistro
+        .getRange(ultimaFila + 1, 1, nuevasFilas.length, nuevasFilas[0].length)
+        .setValues(nuevasFilas);
+      SpreadsheetApp.flush();
+    }
+
+    let msgTasks = '';
+    try {
+      const syncRes = sincronizarBuzonGoogleTasks();
+      msgTasks = `\n\n📱 Google Tasks: ${syncRes.mensaje}`;
+    } catch (e) {
+      msgTasks = `\n(Nota: Activa el servicio Google Tasks API para verlos en la app Tareas).`;
+    }
+
+    return {
+      ok: true,
+      fecha: hoyStr,
+      insertados: nuevasFilas.length,
+      mensaje: `Se han volcado ${nuevasFilas.length} hábitos nuevos para hoy (${hoyStr}).${msgTasks}`
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function correspondeFrecuenciaHoy_(frecuenciaStr, diaSemana) {
+  const freq = normalizarTexto_(frecuenciaStr);
+
+  if (freq === 'diaria' || freq === 'diario' || freq === 'todos los dias') {
+    return true;
+  }
+  if (freq === 'l-v' || freq === 'lunes a viernes' || freq === 'laborables') {
+    return diaSemana >= 1 && diaSemana <= 5;
+  }
+  if (freq === 'fin de semana' || freq === 's-d' || freq === 'sabado y domingo') {
+    return diaSemana === 0 || diaSemana === 6;
+  }
+  if (freq.startsWith('semanal')) {
+    if (freq.includes('domingo')) return diaSemana === 0;
+    if (freq.includes('martes')) return diaSemana === 2;
+    if (freq.includes('miercoles')) return diaSemana === 3;
+    if (freq.includes('jueves')) return diaSemana === 4;
+    if (freq.includes('viernes')) return diaSemana === 5;
+    if (freq.includes('sabado')) return diaSemana === 6;
+    return diaSemana === 1;
+  }
+
+  return false;
+}
+
+function instalarTriggersAutomaticos() {
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(trigger => {
+    const fn = trigger.getHandlerFunction();
+    if (fn === 'generarHabitosDelDia' || fn === 'sincronizarBuzonGoogleTasks') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  ScriptApp.newTrigger('generarHabitosDelDia')
+    .timeBased()
+    .everyDays(1)
+    .atHour(0)
+    .nearMinute(5)
+    .create();
+
+  ScriptApp.newTrigger('sincronizarBuzonGoogleTasks')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  try {
+    SpreadsheetApp.getUi().alert(
+      '⏰ Automatización Bidireccional Activada',
+      '1. Cada noche (00:05 AM) tus hábitos se vuelcan en la hoja y aparecen solos en tu lista "Hábitos" de Google Tasks.\n2. Cada 5 minutos, cualquier hábito que marques con ✓ en Google Tasks se marcará como Completado en tu Google Sheet.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } catch (e) {
+    Logger.log('Triggers instalados correctamente.');
+  }
+}
+
+function instalarTriggerDiario() {
+  instalarTriggersAutomaticos();
+}
+
+/**
+ * FUNCIONES AUXILIARES DE GOOGLE TASKS Y PLANTILLAS
+ */
+function obtenerOCrearListaHabitosTasks_() {
+  const taskLists = Tasks.Tasklists.list({ maxResults: 100 });
+  const listas = taskLists.items || [];
+  const nombreBuscado = normalizarTexto_(CONFIG.TASKS_LIST_NAME);
+  let listaHabitos = listas.find(l => normalizarTexto_(l.title) === nombreBuscado);
+
+  if (!listaHabitos) {
+    listaHabitos = Tasks.Tasklists.insert({ title: CONFIG.TASKS_LIST_NAME });
+  }
+  return listaHabitos;
+}
+
+function asegurarPendienteEnGoogleTasks_(nombre, tipo, categoria) {
+  try {
+    if (typeof Tasks === 'undefined') return;
+    const lista = obtenerOCrearListaHabitosTasks_();
+    const res = Tasks.Tasks.list(lista.id, { showCompleted: false, maxResults: 100 });
+    const items = res.items || [];
+    const norm = normalizarTexto_(nombre);
+    const yaExiste = items.some(t => normalizarTexto_(t.title) === norm);
+    if (!yaExiste) {
+      Tasks.Tasks.insert({ title: nombre, notes: `[${tipo} · ${categoria}]` }, lista.id);
+    }
+  } catch (e) {}
+}
+
+function marcarCompletadaEnGoogleTasks_(nombre) {
+  try {
+    if (typeof Tasks === 'undefined') return;
+    const lista = obtenerOCrearListaHabitosTasks_();
+    const res = Tasks.Tasks.list(lista.id, { showCompleted: true, showHidden: true, maxResults: 100 });
+    const items = res.items || [];
+    const norm = normalizarTexto_(nombre);
+    items.forEach(t => {
+      const tNorm = normalizarTexto_(t.title);
+      if (tNorm === norm || tNorm.includes(norm) || norm.includes(tNorm)) {
+        try { Tasks.Tasks.remove(lista.id, t.id); } catch (e) {}
+      }
+    });
+  } catch (e) {}
+}
+
+function eliminarDeGoogleTasks_(nombre) {
+  marcarCompletadaEnGoogleTasks_(nombre);
+}
+
+function asegurarEnPlantillasHabitos_(sheetPlantillas, nombre, categoria, frecuencia, horaMomento) {
+  const datos = sheetPlantillas.getDataRange().getValues();
+  const norm = normalizarTexto_(nombre);
+  for (let i = 1; i < datos.length; i++) {
+    if (normalizarTexto_(String(datos[i][1])) === norm) {
+      return;
+    }
+  }
+  const nuevoId = `HAB-${String(datos.length).padStart(3, '0')}`;
+  sheetPlantillas.appendRow([
+    nuevoId,
+    nombre,
+    categoria || 'General',
+    frecuencia || 'Diaria',
+    horaMomento || 'Cualquier momento',
+    true
+  ]);
+}
+
+/**
+ * 6. ENDPOINTS WEBHOOK Y APLICACIÓN VISUAL (doGet / doPost)
+ */
+function doGet(e) {
+  try {
+    try { sincronizarBuzonGoogleTasks(); } catch (ignore) {}
+
+    if (e && e.parameter && e.parameter.format === 'json') {
+      return respuestaJson_({
+        ok: true,
+        dashboard: obtenerEstadoDashboard()
+      });
+    }
+
+    return HtmlService.createHtmlOutput(obtenerHtmlApp_())
+      .setTitle('⚡ Mi Gestor de Hábitos y Tareas')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+  } catch (error) {
+    return respuestaJson_({ ok: false, error: error.message });
+  }
+}
+
+function doPost(e) {
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return respuestaJson_({ ok: false, error: 'Payload vacío. Se esperaba un cuerpo JSON.' });
+    }
+
+    const body = JSON.parse(e.postData.contents);
+
+    const expectedToken = PropertiesService.getScriptProperties().getProperty('WEBHOOK_TOKEN');
+    if (expectedToken && body.token !== expectedToken) {
+      return respuestaJson_({ ok: false, error: 'No autorizado: Token inválido.' });
+    }
+
+    if (body.comando === 'DASHBOARD') {
+      try { sincronizarBuzonGoogleTasks(); } catch (ignore) {}
+      return respuestaJson_({
+        ok: true,
+        mensaje: 'Métricas obtenidas correctamente',
+        dashboard: obtenerEstadoDashboard()
+      });
+    }
+
+    if (body.comando === 'GENERAR_HABITOS_HOY') {
+      const resultadoVolcado = generarHabitosDelDia();
+      return respuestaJson_({
+        ...resultadoVolcado,
+        dashboard: obtenerEstadoDashboard()
+      });
+    }
+
+    if (body.accionDirecta && body.accionDirecta.accion) {
+      const resultadoDirecto = ejecutarAccion(body.accionDirecta);
+      return respuestaJson_(resultadoDirecto);
+    }
+
+    const textoUsuario = (body.mensaje || '').trim();
+    if (!textoUsuario) {
+      return respuestaJson_({
+        ok: false,
+        error: 'El campo "mensaje" está vacío.'
+      });
+    }
+
+    const ordenInterpretada = procesarOrdenGemini(textoUsuario);
+    const resultadoEjecucion = ejecutarAccion(ordenInterpretada);
+
+    return respuestaJson_(resultadoEjecucion);
+
+  } catch (error) {
+    return respuestaJson_({
+      ok: false,
+      error: error.message,
+      stack: error.stack
+    });
+  }
+}
+
+/**
+ * Funciones puente llamadas desde la interfaz web (google.script.run)
+ */
+function apiObtenerDatos() {
+  try { sincronizarBuzonGoogleTasks(); } catch (ignore) {}
+  return obtenerEstadoDashboard();
+}
+
+function apiEnviarComandoVoz(texto) {
+  const orden = procesarOrdenGemini(texto);
+  return ejecutarAccion(orden);
+}
+
+function apiAccionDirecta(orden) {
+  return ejecutarAccion(orden);
+}
+
+function apiGestionarPlantilla(operacion) {
+  return gestionarPlantillaHabito(operacion);
+}
+
+function apiVolcarHabitosHoy() {
+  const res = generarHabitosDelDia();
+  return {
+    ...res,
+    dashboard: obtenerEstadoDashboard()
+  };
+}
+
+function obtenerEstadoDashboard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetRegistro = obtenerHojaFlexible_(ss, CONFIG.SHEETS.REGISTRO);
+  const sheetPlantillas = obtenerHojaFlexible_(ss, CONFIG.SHEETS.PLANTILLAS);
+  const sheetDashboard = obtenerHojaFlexible_(ss, CONFIG.SHEETS.DASHBOARD);
+
+  const hoyStr = obtenerFechaHoyStr_();
+  const data = sheetRegistro ? sheetRegistro.getDataRange().getValues() : [];
+
+  let totalHoy = 0;
+  let completadosHoy = 0;
+  const pendientesHoy = [];
+  const completadosListaHoy = [];
+  const porCategoria = {};
+
+  for (let i = 1; i < data.length; i++) {
+    const fechaFila = formatearCeldaFecha_(data[i][0]);
+    if (fechaFila !== hoyStr) continue;
+
+    const tipo = String(data[i][1] || 'Tarea');
+    const nombre = String(data[i][2] || '');
+    const categoria = String(data[i][3] || 'General');
+    const estado = String(data[i][4] || 'Pendiente');
+    const timestamp = data[i][5] ? String(data[i][5]) : null;
+
+    totalHoy++;
+    if (!porCategoria[categoria]) {
+      porCategoria[categoria] = { total: 0, completados: 0, porcentaje: 0 };
+    }
+    porCategoria[categoria].total++;
+
+    if (estado.toLowerCase() === 'completado') {
+      completadosHoy++;
+      porCategoria[categoria].completados++;
+      completadosListaHoy.push({
+        idFila: i + 1,
+        tipo,
+        nombre,
+        categoria,
+        timestamp
+      });
+    } else {
+      pendientesHoy.push({
+        idFila: i + 1,
+        tipo,
+        nombre,
+        categoria
+      });
+    }
+  }
+
+  Object.keys(porCategoria).forEach(cat => {
+    const c = porCategoria[cat];
+    c.porcentaje = c.total > 0 ? Math.round((c.completados / c.total) * 100) : 0;
+  });
+
+  const porcentajeHoy = totalHoy > 0 ? Math.round((completadosHoy / totalHoy) * 100) : 0;
+
+  // Leer catálogo completo de Plantillas_Habitos para la pestaña CRUD de la Web App
+  const plantillasCatalogo = [];
+  if (sheetPlantillas) {
+    const pData = sheetPlantillas.getDataRange().getValues();
+    for (let i = 1; i < pData.length; i++) {
+      const nombreHab = String(pData[i][1] || '').trim();
+      if (!nombreHab) continue;
+      const activoRaw = pData[i][5];
+      const estaActivo =
+        activoRaw === true ||
+        ['si', 'sí', 'true', '1', 'activo', 'x'].includes(String(activoRaw).trim().toLowerCase());
+
+      plantillasCatalogo.push({
+        idFila: i + 1,
+        idCodigo: String(pData[i][0] || `HAB-${i}`),
+        nombre: nombreHab,
+        categoria: String(pData[i][2] || 'General'),
+        frecuencia: String(pData[i][3] || 'Diaria'),
+        horaMomento: String(pData[i][4] || 'Cualquier momento'),
+        activo: estaActivo
+      });
+    }
+  }
+
+  let snapshotDashboardSheet = [];
+  if (sheetDashboard && sheetDashboard.getLastRow() > 0 && sheetDashboard.getLastColumn() > 0) {
+    const maxRows = Math.min(sheetDashboard.getLastRow(), 25);
+    const maxCols = Math.min(sheetDashboard.getLastColumn(), 8);
+    snapshotDashboardSheet = sheetDashboard.getRange(1, 1, maxRows, maxCols).getDisplayValues();
+  }
+
+  return {
+    fecha: hoyStr,
+    actualizadoEn: Utilities.formatDate(new Date(), CONFIG.TIMEZONE, 'HH:mm'),
+    hoy: {
+      total: totalHoy,
+      completados: completadosHoy,
+      pendientesCount: pendientesHoy.length,
+      porcentajeCumplimiento: porcentajeHoy,
+      pendientes: pendientesHoy,
+      completadosLista: completadosListaHoy,
+      porCategoria: porCategoria
+    },
+    plantillas: plantillasCatalogo,
+    vistaDashboard: snapshotDashboardSheet
+  };
+}
+
+/**
+ * Obtiene una hoja del Spreadsheet ignorando tildes, mayúsculas, espacios o guiones bajos.
+ * Así funciona tanto con "Plantillas_Habitos" como con "Plantillas_Hábitos" o "Plantillas Habitos".
+ */
+function obtenerHojaFlexible_(ss, nombreBuscado) {
+  if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
+  const exacta = ss.getSheetByName(nombreBuscado);
+  if (exacta) return exacta;
+
+  const clave = normalizarTexto_(nombreBuscado).replace(/_/g, '');
+  const hojas = ss.getSheets();
+  for (let i = 0; i < hojas.length; i++) {
+    const nombreHojaNorm = normalizarTexto_(hojas[i].getName()).replace(/_/g, '');
+    if (nombreHojaNorm === clave || nombreHojaNorm.includes(clave) || clave.includes(nombreHojaNorm)) {
+      return hojas[i];
+    }
+  }
+  return null;
+}
+
+function obtenerFechaHoyStr_(dateObj) {
+  const d = dateObj || new Date();
+  return Utilities.formatDate(d, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+}
+
+function formatearCeldaFecha_(valor) {
+  if (!valor) return '';
+  if (Object.prototype.toString.call(valor) === '[object Date]' && !isNaN(valor)) {
+    return Utilities.formatDate(valor, CONFIG.TIMEZONE, 'yyyy-MM-dd');
+  }
+  const texto = String(valor).trim();
+  const matchDMY = texto.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (matchDMY) {
+    return `${matchDMY[3]}-${matchDMY[2].padStart(2, '0')}-${matchDMY[1].padStart(2, '0')}`;
+  }
+  return texto.substring(0, 10);
+}
+
+function normalizarTexto_(str) {
+  return String(str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/gi, '')
+    .trim();
+}
+
+function obtenerNombresRegistradosHoy_() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(CONFIG.SHEETS.REGISTRO);
+    if (!sheet) return [];
+    const hoyStr = obtenerFechaHoyStr_();
+    const data = sheet.getDataRange().getValues();
+    const nombres = [];
+
+    for (let i = 1; i < data.length; i++) {
+      if (formatearCeldaFecha_(data[i][0]) === hoyStr && data[i][2]) {
+        nombres.push(`${data[i][2]} (${data[i][4]})`);
+      }
+    }
+    return nombres;
+  } catch (e) {
+    return [];
+  }
+}
+
+function respuestaJson_(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * ============================================================================
+ * 7. INTERFAZ WEB CON CRUD COMPLETO (HOY + CATÁLOGO DE HÁBITOS + MODO RELOJ)
+ * ============================================================================
+ */
+function obtenerHtmlApp_() {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0B0F19">
+  <title>⚡ Mi Gestor</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0B0F19;
+      --card: rgba(22, 30, 49, 0.88);
+      --card-border: rgba(255, 255, 255, 0.09);
+      --primary: #6366F1;
+      --primary-glow: rgba(99, 102, 241, 0.35);
+      --accent: #10B981;
+      --danger: #EF4444;
+      --text: #F8FAFC;
+      --muted: #94A3B8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: radial-gradient(circle at top right, #1E1B4B, #0B0F19 60%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 16px;
+      padding-bottom: 100px;
+    }
+    .container { max-width: 500px; margin: 0 auto; }
+
+    /* HEADER */
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .title-group h1 {
+      font-size: 1.35rem; font-weight: 800;
+      background: linear-gradient(90deg, #FFF, #A5B4FC);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .title-group p { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
+    .top-actions { display: flex; gap: 8px; }
+    .icon-btn {
+      background: var(--card); border: 1px solid var(--card-border); color: var(--text);
+      width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center;
+      justify-content: center; font-size: 1.05rem; cursor: pointer;
+    }
+
+    /* TABS NAVIGATION */
+    .nav-tabs {
+      display: flex; gap: 8px; background: rgba(15, 23, 42, 0.75);
+      padding: 5px; border-radius: 16px; border: 1px solid var(--card-border);
+      margin-bottom: 16px;
+    }
+    .tab-btn {
+      flex: 1; padding: 10px; border: none; border-radius: 12px;
+      background: transparent; color: var(--muted); font-family: inherit;
+      font-size: 0.84rem; font-weight: 700; cursor: pointer; transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: var(--primary); color: white;
+      box-shadow: 0 4px 14px var(--primary-glow);
+    }
+
+    /* HERO CARD */
+    .hero-card {
+      background: var(--card); backdrop-filter: blur(16px); border: 1px solid var(--card-border);
+      border-radius: 24px; padding: 18px; display: flex; align-items: center; gap: 18px;
+      margin-bottom: 16px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    }
+    .ring-wrap { position: relative; width: 92px; height: 92px; flex-shrink: 0; }
+    .ring-svg { transform: rotate(-90deg); width: 92px; height: 92px; }
+    .ring-bg { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 9; }
+    .ring-progress {
+      fill: none; stroke: url(#gradRing); stroke-width: 9; stroke-linecap: round;
+      stroke-dasharray: 238.76; stroke-dashoffset: 238.76;
+      transition: stroke-dashoffset 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .ring-label { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .ring-pct { font-size: 1.3rem; font-weight: 800; }
+    .ring-sub { font-size: 0.68rem; color: var(--muted); }
+    .hero-info { flex: 1; }
+    .hero-info h2 { font-size: 1.02rem; font-weight: 700; margin-bottom: 4px; }
+    .hero-info p { font-size: 0.78rem; color: var(--muted); margin-bottom: 10px; }
+    .sync-pill {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 0.74rem; font-weight: 600;
+      padding: 6px 12px; border-radius: 99px; background: rgba(99, 102, 241, 0.16);
+      color: #C7D2FE; border: 1px solid rgba(99, 102, 241, 0.35); cursor: pointer;
+    }
+
+    /* CATEGORIES BAR */
+    .cats-scroll { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 14px; scrollbar-width: none; }
+    .cats-scroll::-webkit-scrollbar { display: none; }
+    .cat-chip {
+      background: var(--card); border: 1px solid var(--card-border); padding: 7px 12px;
+      border-radius: 12px; font-size: 0.74rem; white-space: nowrap; display: flex; align-items: center; gap: 6px;
+    }
+    .cat-pct { font-weight: 800; color: #A5B4FC; }
+
+    /* LISTS */
+    .section-title {
+      font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+      font-weight: 700; margin: 14px 0 10px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .task-list { display: flex; flex-direction: column; gap: 10px; }
+    .task-item {
+      background: var(--card); border: 1px solid var(--card-border); border-radius: 18px;
+      padding: 13px 15px; display: flex; align-items: center; gap: 12px;
+    }
+    .task-item.done { opacity: 0.62; background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.22); }
+    .task-item.paused { opacity: 0.5; }
+    .check-circle {
+      width: 28px; height: 28px; border-radius: 50%; border: 2px solid #6366F1;
+      display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; font-size: 0.9rem;
+    }
+    .task-item.done .check-circle { background: var(--accent); border-color: var(--accent); color: #052E16; font-weight: 900; }
+    .task-content { flex: 1; min-width: 0; cursor: pointer; }
+    .task-name { font-size: 0.94rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .task-item.done .task-name { text-decoration: line-through; color: var(--muted); }
+    .task-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; font-size: 0.69rem; color: var(--muted); }
+    .badge { padding: 2px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.07); font-weight: 600; }
+    .item-actions { display: flex; gap: 4px; align-items: center; }
+    .act-btn {
+      background: rgba(255, 255, 255, 0.05); border: none; color: #94A3B8;
+      width: 32px; height: 32px; border-radius: 10px; font-size: 0.88rem;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    .act-btn:hover { background: rgba(255, 255, 255, 0.12); color: white; }
+
+    /* TOGGLE SWITCH PARA PLANTILLAS */
+    .switch-btn {
+      padding: 4px 10px; border-radius: 99px; font-size: 0.7rem; font-weight: 700;
+      border: none; cursor: pointer;
+    }
+    .switch-btn.on { background: rgba(16, 185, 129, 0.2); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .switch-btn.off { background: rgba(148, 163, 184, 0.15); color: #94A3B8; border: 1px solid rgba(148, 163, 184, 0.3); }
+
+    /* FLOATING ACTION BUTTON (+) */
+    .fab {
+      position: fixed; bottom: 24px; right: 24px;
+      background: linear-gradient(135deg, #6366F1, #8B5CF6);
+      color: white; border: none; border-radius: 99px;
+      padding: 14px 22px; font-family: inherit; font-weight: 800; font-size: 0.92rem;
+      box-shadow: 0 10px 25px rgba(99, 102, 241, 0.5);
+      display: flex; align-items: center; gap: 8px; cursor: pointer; z-index: 90;
+    }
+    .fab:active { transform: scale(0.95); }
+
+    /* MODAL CRUD */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(5, 8, 17, 0.8);
+      backdrop-filter: blur(6px); display: none; align-items: center;
+      justify-content: center; padding: 16px; z-index: 200;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-card {
+      background: #131B2E; border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 24px; width: 100%; max-width: 420px; padding: 22px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+    }
+    .modal-title { font-size: 1.1rem; font-weight: 800; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 0.76rem; color: var(--muted); font-weight: 700; margin-bottom: 6px; }
+    .form-control {
+      width: 100%; padding: 11px 14px; border-radius: 12px;
+      background: #0B0F19; border: 1px solid rgba(255, 255, 255, 0.12);
+      color: white; font-family: inherit; font-size: 0.9rem; outline: none;
+    }
+    .form-control:focus { border-color: var(--primary); }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+    .btn {
+      padding: 10px 18px; border-radius: 12px; font-family: inherit;
+      font-weight: 700; font-size: 0.86rem; border: none; cursor: pointer;
+    }
+    .btn-cancel { background: rgba(255, 255, 255, 0.08); color: var(--muted); }
+    .btn-save { background: var(--primary); color: white; }
+
+    /* TOAST */
+    .toast {
+      position: fixed; bottom: 85px; left: 50%; transform: translateX(-50%) translateY(120px);
+      background: rgba(15, 23, 42, 0.96); border: 1px solid rgba(99, 102, 241, 0.45); color: white;
+      padding: 11px 18px; border-radius: 14px; font-size: 0.84rem; font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5); transition: transform 0.28s ease;
+      z-index: 300; max-width: 90vw; text-align: center; pointer-events: none;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* MODO RELOJ WEAR OS */
+    body.watch-mode { background: #000000; padding: 10px 8px 36px; }
+    body.watch-mode .container { max-width: 230px; text-align: center; }
+    body.watch-mode .header, body.watch-mode .nav-tabs, body.watch-mode .cats-scroll,
+    body.watch-mode .hero-info p, body.watch-mode .item-actions, body.watch-mode .fab { display: none !important; }
+    body.watch-mode .hero-card { flex-direction: column; background: transparent; border: none; padding: 4px; gap: 8px; margin-bottom: 8px; box-shadow: none; }
+    body.watch-mode .task-item { padding: 10px 12px; border-radius: 99px; text-align: left; }
+    body.watch-mode .task-meta { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- CABECERA -->
+    <div class="header">
+      <div class="title-group">
+        <h1>⚡ Mi Gestor</h1>
+        <p id="dateSubtitle">Sincronizado con Google Tasks</p>
+      </div>
+      <div class="top-actions">
+        <button class="icon-btn" onclick="abrirModalCrear()" title="Añadir nuevo">➕</button>
+        <button class="icon-btn" onclick="document.body.classList.toggle('watch-mode')" title="Modo Reloj">⌚</button>
+        <button class="icon-btn" onclick="cargarDatos()" title="Sincronizar ahora">🔄</button>
+      </div>
+    </div>
+
+    <!-- PESTAÑAS DE NAVEGACIÓN (HOY vs CATÁLOGO DE HÁBITOS) -->
+    <div class="nav-tabs">
+      <button class="tab-btn active" id="tabHoyBtn" onclick="cambiarTab('hoy')">📅 Hoy (<span id="tabHoyCount">0</span>)</button>
+      <button class="tab-btn" id="tabPlantillasBtn" onclick="cambiarTab('plantillas')">⚙️ Catálogo Hábitos (<span id="tabPlantillasCount">0</span>)</button>
+    </div>
+
+    <!-- ==================== VISTA 1: HOY ==================== -->
+    <div id="vistaHoy">
+      <div class="hero-card">
+        <div class="ring-wrap">
+          <svg class="ring-svg" viewBox="0 0 96 96">
+            <defs>
+              <linearGradient id="gradRing" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#6366F1" />
+                <stop offset="100%" stop-color="#10B981" />
+              </linearGradient>
+            </defs>
+            <circle class="ring-bg" cx="48" cy="48" r="38"></circle>
+            <circle class="ring-progress" id="ringCircle" cx="48" cy="48" r="38"></circle>
+          </svg>
+          <div class="ring-label">
+            <span class="ring-pct" id="pctText">0%</span>
+            <span class="ring-sub" id="countText">0/0</span>
+          </div>
+        </div>
+
+        <div class="hero-info">
+          <h2 id="statusHeadline">¡Vamos a por el día!</h2>
+          <p>Gestiona tus tareas aquí o desde Google Tasks.</p>
+          <div class="sync-pill" onclick="volcarHabitosHoy()">
+            <span>📥 Volcar hábitos de hoy</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cats-scroll" id="catsContainer"></div>
+
+      <div class="section-title">
+        <span>⏳ Pendientes de hoy</span>
+        <span id="pendCountBadge">0</span>
+      </div>
+      <div class="task-list" id="pendientesList"></div>
+
+      <div class="section-title" style="margin-top: 22px;">
+        <span>✅ Completados hoy</span>
+        <span id="compCountBadge">0</span>
+      </div>
+      <div class="task-list" id="completadosList"></div>
+    </div>
+
+    <!-- ==================== VISTA 2: CATÁLOGO DE HÁBITOS (PLANTILLAS) ==================== -->
+    <div id="vistaPlantillas" style="display: none;">
+      <div class="section-title">
+        <span>📋 Tus Hábitos Recurrentes (Plantillas_Habitos)</span>
+      </div>
+      <div class="task-list" id="plantillasList"></div>
+    </div>
+  </div>
+
+  <!-- BOTÓN FLOTANTE (+ NUEVO) -->
+  <button class="fab" onclick="abrirModalCrear()">
+    <span>＋</span> Nuevo Hábito / Tarea
+  </button>
+
+  <!-- MODAL PARA CREAR / EDITAR (CRUD) -->
+  <div class="modal-backdrop" id="crudModal">
+    <div class="modal-card">
+      <div class="modal-title" id="modalTitle">➕ Nuevo Registro</div>
+
+      <input type="hidden" id="formModo" value="CREAR">
+      <input type="hidden" id="formIdFila" value="">
+
+      <div class="form-group" id="groupTipo">
+        <label>Tipo de registro</label>
+        <select class="form-control" id="formTipo" onchange="actualizarVisibilidadFrecuencia()">
+          <option value="Tarea">📌 Tarea puntual (solo para hoy)</option>
+          <option value="Hábito">🔄 Hábito recurrente (guardar en plantilla)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Nombre</label>
+        <input type="text" class="form-control" id="formNombre" placeholder="Ej: 20 min audio italiano, Comprar pilas...">
+      </div>
+
+      <div class="form-group">
+        <label>Categoría</label>
+        <select class="form-control" id="formCategoria">
+          <option value="Salud">Salud</option>
+          <option value="Estudio">Estudio</option>
+          <option value="Hogar">Hogar</option>
+          <option value="Mantenimiento">Mantenimiento</option>
+          <option value="Finanzas">Finanzas</option>
+          <option value="General">General</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="groupFrecuencia" style="display: none;">
+        <label>Frecuencia del Hábito</label>
+        <select class="form-control" id="formFrecuencia">
+          <option value="Diaria">Diaria (Todos los días)</option>
+          <option value="L-V">L-V (Lunes a Viernes)</option>
+          <option value="Fin de semana">Fin de semana (Sábado y Domingo)</option>
+          <option value="Semanal">Semanal (Lunes)</option>
+        </select>
+      </div>
+
+      <div class="form-group" id="groupMomento" style="display: none;">
+        <label>Hora / Momento del día</label>
+        <input type="text" class="form-control" id="formMomento" placeholder="Ej: Mañana, Noche, 08:00...">
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-cancel" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-save" onclick="guardarFormularioCrud()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toastMsg"></div>
+
+  <script>
+    const CIRCUMFERENCE = 2 * Math.PI * 38;
+    let tabActual = 'hoy';
+    let ultimoDashboard = null;
+
+    if (window.innerWidth <= 280 || window.location.search.includes('watch')) {
+      document.body.classList.add('watch-mode');
+    }
+
+    function cambiarTab(tab) {
+      tabActual = tab;
+      document.getElementById('tabHoyBtn').classList.toggle('active', tab === 'hoy');
+      document.getElementById('tabPlantillasBtn').classList.toggle('active', tab === 'plantillas');
+      document.getElementById('vistaHoy').style.display = tab === 'hoy' ? 'block' : 'none';
+      document.getElementById('vistaPlantillas').style.display = tab === 'plantillas' ? 'block' : 'none';
+    }
+
+    function mostrarToast(texto) {
+      const t = document.getElementById('toastMsg');
+      t.textContent = texto;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3200);
+    }
+
+    function actualizarUI(dashboard) {
+      if (!dashboard || !dashboard.hoy) return;
+      ultimoDashboard = dashboard;
+      const h = dashboard.hoy;
+      const plantillas = dashboard.plantillas || [];
+
+      document.getElementById('dateSubtitle').textContent = \`📅 \${dashboard.fecha} · Sync \${dashboard.actualizadoEn}\`;
+      document.getElementById('pctText').textContent = \`\${h.porcentajeCumplimiento}%\`;
+      document.getElementById('countText').textContent = \`\${h.completados}/\${h.total}\`;
+      document.getElementById('tabHoyCount').textContent = \`\${h.completados}/\${h.total}\`;
+      document.getElementById('tabPlantillasCount').textContent = plantillas.length;
+
+      const offset = CIRCUMFERENCE - (h.porcentajeCumplimiento / 100) * CIRCUMFERENCE;
+      document.getElementById('ringCircle').style.strokeDashoffset = offset;
+
+      if (h.total === 0) {
+        document.getElementById('statusHeadline').textContent = 'Sin hábitos volcados hoy';
+      } else if (h.porcentajeCumplimiento === 100) {
+        document.getElementById('statusHeadline').textContent = '🔥 ¡Día 100% completado!';
+      } else {
+        document.getElementById('statusHeadline').textContent = \`Te quedan \${h.pendientesCount} para hoy\`;
+      }
+
+      // Categorías
+      const catsCont = document.getElementById('catsContainer');
+      catsCont.innerHTML = '';
+      Object.keys(h.porCategoria || {}).forEach(cat => {
+        const c = h.porCategoria[cat];
+        const div = document.createElement('div');
+        div.className = 'cat-chip';
+        div.innerHTML = \`<span>\${cat}</span> <span class="cat-pct">\${c.completados}/\${c.total}</span>\`;
+        catsCont.appendChild(div);
+      });
+
+      // Lista de Pendientes Hoy
+      document.getElementById('pendCountBadge').textContent = h.pendientes.length;
+      const pendList = document.getElementById('pendientesList');
+      pendList.innerHTML = '';
+      if (h.pendientes.length === 0) {
+        pendList.innerHTML = '<div style="color:#64748B;font-size:0.85rem;text-align:center;padding:14px;">🎉 ¡Todo al día!</div>';
+      } else {
+        h.pendientes.forEach(item => pendList.appendChild(crearFilaHoy(item, false)));
+      }
+
+      // Lista de Completados Hoy
+      document.getElementById('compCountBadge').textContent = h.completadosLista.length;
+      const compList = document.getElementById('completadosList');
+      compList.innerHTML = '';
+      h.completadosLista.forEach(item => compList.appendChild(crearFilaHoy(item, true)));
+
+      // Lista de Catálogo de Plantillas
+      const plantList = document.getElementById('plantillasList');
+      plantList.innerHTML = '';
+      if (plantillas.length === 0) {
+        plantList.innerHTML = '<div style="color:#64748B;font-size:0.85rem;text-align:center;padding:14px;">No hay hábitos en Plantillas_Habitos.</div>';
+      } else {
+        plantillas.forEach(p => plantList.appendChild(crearFilaPlantilla(p)));
+      }
+    }
+
+    function crearFilaHoy(item, estaCompletado) {
+      const row = document.createElement('div');
+      row.className = 'task-item' + (estaCompletado ? ' done' : '');
+
+      const check = document.createElement('div');
+      check.className = 'check-circle';
+      check.innerHTML = estaCompletado ? '✓' : '';
+      check.onclick = () => cambiarEstadoItem(item, !estaCompletado);
+
+      const content = document.createElement('div');
+      content.className = 'task-content';
+      content.onclick = () => cambiarEstadoItem(item, !estaCompletado);
+      content.innerHTML = \`
+        <div class="task-name">\${item.nombre}</div>
+        <div class="task-meta">
+          <span class="badge">\${item.tipo}</span>
+          <span class="badge">\${item.categoria}</span>
+        </div>
+      \`;
+
+      const actions = document.createElement('div');
+      actions.className = 'item-actions';
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'act-btn';
+      editBtn.innerHTML = '✏️';
+      editBtn.title = 'Editar';
+      editBtn.onclick = (e) => { e.stopPropagation(); abrirModalEditarHoy(item); };
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'act-btn';
+      delBtn.innerHTML = '🗑️';
+      delBtn.title = 'Borrar de hoy';
+      delBtn.onclick = (e) => { e.stopPropagation(); borrarItemHoy(item); };
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
+      row.appendChild(check);
+      row.appendChild(content);
+      row.appendChild(actions);
+      return row;
+    }
+
+    function crearFilaPlantilla(p) {
+      const row = document.createElement('div');
+      row.className = 'task-item' + (!p.activo ? ' paused' : '');
+
+      const content = document.createElement('div');
+      content.className = 'task-content';
+      content.onclick = () => abrirModalEditarPlantilla(p);
+      content.innerHTML = \`
+        <div class="task-name">\${p.nombre}</div>
+        <div class="task-meta">
+          <span class="badge">🔄 \${p.frecuencia}</span>
+          <span class="badge">\${p.categoria}</span>
+          <span class="badge">🕒 \${p.horaMomento}</span>
+        </div>
+      \`;
+
+      const actions = document.createElement('div');
+      actions.className = 'item-actions';
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'switch-btn ' + (p.activo ? 'on' : 'off');
+      toggleBtn.textContent = p.activo ? 'Activo' : 'Pausado';
+      toggleBtn.onclick = (e) => {
+        e.stopPropagation();
+        toggleActivoPlantilla(p);
+      };
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'act-btn';
+      editBtn.innerHTML = '✏️';
+      editBtn.onclick = (e) => { e.stopPropagation(); abrirModalEditarPlantilla(p); };
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'act-btn';
+      delBtn.innerHTML = '🗑️';
+      delBtn.onclick = (e) => { e.stopPropagation(); borrarPlantilla(p); };
+
+      actions.appendChild(toggleBtn);
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
+      row.appendChild(content);
+      row.appendChild(actions);
+      return row;
+    }
+
+    /* ==================== FUNCIONES DEL MODAL CRUD ==================== */
+    function actualizarVisibilidadFrecuencia() {
+      const tipo = document.getElementById('formTipo').value;
+      const modo = document.getElementById('formModo').value;
+      const mostrarHabito = (tipo === 'Hábito' || modo === 'EDITAR_PLANTILLA');
+      document.getElementById('groupFrecuencia').style.display = mostrarHabito ? 'block' : 'none';
+      document.getElementById('groupMomento').style.display = mostrarHabito ? 'block' : 'none';
+    }
+
+    function abrirModalCrear() {
+      document.getElementById('formModo').value = 'CREAR';
+      document.getElementById('formIdFila').value = '';
+      document.getElementById('modalTitle').textContent = tabActual === 'plantillas' ? '➕ Nuevo Hábito en Catálogo' : '➕ Añadir Tarea o Hábito';
+      document.getElementById('groupTipo').style.display = 'block';
+      document.getElementById('formTipo').value = tabActual === 'plantillas' ? 'Hábito' : 'Tarea';
+      document.getElementById('formNombre').value = '';
+      document.getElementById('formCategoria').value = 'General';
+      document.getElementById('formFrecuencia').value = 'Diaria';
+      document.getElementById('formMomento').value = 'Cualquier momento';
+      actualizarVisibilidadFrecuencia();
+      document.getElementById('crudModal').classList.add('open');
+      setTimeout(() => document.getElementById('formNombre').focus(), 100);
+    }
+
+    function abrirModalEditarHoy(item) {
+      document.getElementById('formModo').value = 'EDITAR_HOY';
+      document.getElementById('formIdFila').value = item.idFila;
+      document.getElementById('modalTitle').textContent = '✏️ Editar registro de hoy';
+      document.getElementById('groupTipo').style.display = 'block';
+      document.getElementById('formTipo').value = item.tipo || 'Tarea';
+      document.getElementById('formNombre').value = item.nombre || '';
+      document.getElementById('formCategoria').value = item.categoria || 'General';
+      document.getElementById('groupFrecuencia').style.display = 'none';
+      document.getElementById('groupMomento').style.display = 'none';
+      document.getElementById('crudModal').classList.add('open');
+    }
+
+    function abrirModalEditarPlantilla(p) {
+      document.getElementById('formModo').value = 'EDITAR_PLANTILLA';
+      document.getElementById('formIdFila').value = p.idFila;
+      document.getElementById('modalTitle').textContent = '✏️ Editar Hábito de Plantilla';
+      document.getElementById('groupTipo').style.display = 'none';
+      document.getElementById('formTipo').value = 'Hábito';
+      document.getElementById('formNombre').value = p.nombre || '';
+      document.getElementById('formCategoria').value = p.categoria || 'General';
+      document.getElementById('formFrecuencia').value = p.frecuencia || 'Diaria';
+      document.getElementById('formMomento').value = p.horaMomento || 'Cualquier momento';
+      document.getElementById('groupFrecuencia').style.display = 'block';
+      document.getElementById('groupMomento').style.display = 'block';
+      document.getElementById('crudModal').classList.add('open');
+    }
+
+    function cerrarModal() {
+      document.getElementById('crudModal').classList.remove('open');
+    }
+
+    function guardarFormularioCrud() {
+      const modo = document.getElementById('formModo').value;
+      const idFila = document.getElementById('formIdFila').value;
+      const tipo = document.getElementById('formTipo').value;
+      const nombre = document.getElementById('formNombre').value.trim();
+      const categoria = document.getElementById('formCategoria').value;
+      const frecuencia = document.getElementById('formFrecuencia').value;
+      const horaMomento = document.getElementById('formMomento').value.trim() || 'Cualquier momento';
+
+      if (!nombre) {
+        mostrarToast('⚠️ Escribe un nombre');
+        return;
+      }
+
+      cerrarModal();
+      mostrarToast('⏳ Guardando cambios...');
+
+      if (modo === 'CREAR') {
+        google.script.run
+          .withSuccessHandler(res => { actualizarUI(res.dashboard); mostrarToast(res.mensaje); })
+          .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+          .apiAccionDirecta({
+            accion: 'CREAR',
+            tipo: tipo,
+            nombre: nombre,
+            categoria: categoria,
+            frecuencia: frecuencia,
+            horaMomento: horaMomento,
+            guardarEnPlantilla: (tipo === 'Hábito'),
+            forzarHoy: true
+          });
+      } else if (modo === 'EDITAR_HOY') {
+        google.script.run
+          .withSuccessHandler(res => { actualizarUI(res.dashboard); mostrarToast(res.mensaje); })
+          .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+          .apiAccionDirecta({
+            accion: 'EDITAR_HOY',
+            idFila: Number(idFila),
+            tipo: tipo,
+            nombre: nombre,
+            categoria: categoria
+          });
+      } else if (modo === 'EDITAR_PLANTILLA') {
+        google.script.run
+          .withSuccessHandler(res => { actualizarUI(res.dashboard); mostrarToast(res.mensaje); })
+          .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+          .apiGestionarPlantilla({
+            modo: 'EDITAR_PLANTILLA',
+            idFila: Number(idFila),
+            nombre: nombre,
+            categoria: categoria,
+            frecuencia: frecuencia,
+            horaMomento: horaMomento,
+            activo: true
+          });
+      }
+    }
+
+    /* ==================== ACCIONES DIRECTAS DE FILAS ==================== */
+    function cargarDatos() {
+      mostrarToast('⏳ Sincronizando...');
+      google.script.run
+        .withSuccessHandler(res => { actualizarUI(res); mostrarToast('✅ Sincronizado'); })
+        .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+        .apiObtenerDatos();
+    }
+
+    function cambiarEstadoItem(item, marcarCompletado) {
+      mostrarToast(marcarCompletado ? '✅ Completando...' : '↩️ Reabriendo...');
+      google.script.run
+        .withSuccessHandler(res => { actualizarUI(res.dashboard); mostrarToast(res.mensaje); })
+        .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+        .apiAccionDirecta({
+          accion: marcarCompletado ? 'COMPLETAR' : 'REABRIR',
+          idFila: item.idFila,
+          nombre: item.nombre,
+          tipo: item.tipo,
+          categoria: item.categoria
+        });
+    }
+
+    function borrarItemHoy(item) {
+      if (!confirm(\`¿Eliminar "\${item.nombre}" de la lista de hoy?\`)) return;
+      mostrarToast('🗑️ Eliminando...');
+      google.script.run
+        .withSuccessHandler(res => { actualizarUI(res.dashboard); mostrarToast(res.mensaje); })
+        .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+        .apiAccionDirecta({ accion: 'BORRAR', idFila: item.idFila, nombre: item.nombre });
+    }
+
+    function toggleActivoPlantilla(p) {
+      mostrarToast('⏳ Actualizando estado...');
+      google.script.run
+        .withSuccessHandler(res => { actualizarUI(res.dashboard); mostrarToast(res.mensaje); })
+        .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+        .apiGestionarPlantilla({
+          modo: 'TOGGLE_ACTIVO',
+          idFila: p.idFila,
+          activo: !p.activo
+        });
+    }
+
+    function borrarPlantilla(p) {
+      const borrarTambienHoy = confirm(\`¿Seguro que quieres eliminar el hábito "\${p.nombre}" de tu catálogo Plantillas_Habitos?\\n\\n(También se quitará de la lista de hoy si estaba pendiente).\`);
+      if (!borrarTambienHoy) return;
+      mostrarToast('🗑️ Eliminando del catálogo...');
+      google.script.run
+        .withSuccessHandler(res => { actualizarUI(res.dashboard); mostrarToast(res.mensaje); })
+        .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+        .apiGestionarPlantilla({
+          modo: 'BORRAR_PLANTILLA',
+          idFila: p.idFila,
+          borrarDeHoy: true
+        });
+    }
+
+    function volcarHabitosHoy() {
+      mostrarToast('📥 Volcando a Sheets y Google Tasks...');
+      google.script.run
+        .withSuccessHandler(res => { actualizarUI(res.dashboard); mostrarToast('✅ Hábitos volcados'); })
+        .withFailureHandler(err => mostrarToast('❌ ' + err.message))
+        .apiVolcarHabitosHoy();
+    }
+
+    window.onload = cargarDatos;
+  </script>
+</body>
+</html>`;
+}

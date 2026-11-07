@@ -1,0 +1,13 @@
+# Documentación e instrucciones personales del autor (No subir al repositorio público)
+INSTRUCCIONES.md
+COMANDOS_VOZ.md
+
+# Archivos del sistema y entorno local
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+.env
+.env.*
+.vscode/
+.idea/
