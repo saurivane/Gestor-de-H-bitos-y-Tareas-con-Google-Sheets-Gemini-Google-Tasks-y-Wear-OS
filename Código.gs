@@ -609,10 +609,13 @@ function sincronizarBuzonGoogleTasks() {
 
   const listasARevisar = [{ id: targetListId, esPrincipalHabitos: true }];
   try {
-    const defaultList = Tasks.Tasklists.get('@default');
-    if (defaultList && defaultList.id !== targetListId) {
-      listasARevisar.push({ id: defaultList.id, esPrincipalHabitos: false });
-    }
+    const todasLasListasRes = Tasks.Tasklists.list({ maxResults: 100 });
+    const todasLasListas = todasLasListasRes.items || [];
+    todasLasListas.forEach(lista => {
+      if (lista && lista.id && lista.id !== targetListId) {
+        listasARevisar.push({ id: lista.id, esPrincipalHabitos: false });
+      }
+    });
   } catch (e) {}
 
   const detallesCambios = [];
@@ -1533,6 +1536,7 @@ function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
   if (filasDatos.length > 0) {
     const rangoDatos = sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 5);
     sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 1).setNumberFormat('@');
+    sheetDashboard.getRange(filaInicio + 2, colInicio + 1, filasDatos.length, 3).setNumberFormat('0');
     rangoDatos.setValues(filasDatos);
 
     sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 1)
@@ -1542,6 +1546,7 @@ function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
       .setHorizontalAlignment('left');
 
     sheetDashboard.getRange(filaInicio + 2, colInicio + 1, filasDatos.length, 3)
+      .setNumberFormat('0')
       .setHorizontalAlignment('center')
       .setBackground('#FFFFFF');
 
@@ -1682,28 +1687,43 @@ function normalizarTexto_(str) {
 }
 
 /**
- * Detecta y limpia el prefijo/alias de asistente de voz configurado en PropertiesService ('VOICE_ASSISTANT_PREFIX').
- * Soporta formatos como "[Alias] ...", "Alias: ...", "Alias, ..." o "Dile a Alias que ...".
+ * Detecta y limpia el prefijo/alias de asistente de voz configurado en PropertiesService ('VOICE_ASSISTANT_PREFIX'),
+ * o cualquier etiqueta inicial entre corchetes como "[Alias] ...".
  */
 function limpiarPrefijoAsistente_(texto) {
   const raw = String(texto || '').trim();
+  if (!raw) return { texto: '', teniaPrefijo: false };
+
   const alias = (PropertiesService.getScriptProperties().getProperty('VOICE_ASSISTANT_PREFIX') || '').trim();
-  if (!raw || !alias) {
-    return { texto: raw, teniaPrefijo: false };
+
+  // 1. Si empieza por etiqueta explícita entre corchetes "[Algo] ..." (por ej. "[Jarvis] ..."), la detectamos siempre
+  const matchCorchetes = raw.match(/^\[([^\]]+)\]\s*[,:\-]?\s*(.+)$/);
+  if (matchCorchetes && matchCorchetes[2]) {
+    const tagInterior = matchCorchetes[1].trim().toLowerCase();
+    // Evitar confundir con "[Hábito]" si el usuario dictó literalmente "[Hábito]"
+    if (tagInterior !== 'habito' && tagInterior !== 'hábito' && tagInterior !== 'tarea') {
+      return {
+        texto: matchCorchetes[2].trim(),
+        teniaPrefijo: true
+      };
+    }
   }
 
-  const aliasEsc = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regexPrefijo = new RegExp(
-    `^(?:\\[${aliasEsc}\\]|(?:dile\\s+a\\s+|oye\\s+|hola\\s+)?${aliasEsc}(?:\\s+que\\s+|\\s*[,:\\-]\\s*|\\s+))(.*)$`,
-    'i'
-  );
+  // 2. Si además hay un alias configurado en PropertiesService, detectar también "Alias: ...", "Alias, ..." o "Dile a Alias que ..."
+  if (alias) {
+    const aliasEsc = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regexPrefijo = new RegExp(
+      `^(?:\\[${aliasEsc}\\]|(?:dile\\s+a\\s+|oye\\s+|hola\\s+)?${aliasEsc}(?:\\s+que\\s+|\\s*[,:\\-]\\s*|\\s+))(.*)$`,
+      'i'
+    );
 
-  const match = raw.match(regexPrefijo);
-  if (match && match[1]) {
-    return {
-      texto: match[1].trim(),
-      teniaPrefijo: true
-    };
+    const match = raw.match(regexPrefijo);
+    if (match && match[1]) {
+      return {
+        texto: match[1].trim(),
+        teniaPrefijo: true
+      };
+    }
   }
 
   return { texto: raw, teniaPrefijo: false };
