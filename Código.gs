@@ -33,6 +33,7 @@ function onOpen() {
     .addSeparator()
     .addItem('🔄 1. Volcar hábitos de hoy (+ Enviar a Google Tasks)', 'generarHabitosDelDiaManual')
     .addItem('🔃 2. Sincronizar con Google Tasks ("Hábitos") ahora', 'sincronizarGoogleTasksManual')
+    .addItem('📊 3. Actualizar tabla KPI por Meses en hoja Dashboard', 'actualizarKpiMensualEnSheetManual')
     .addSeparator()
     .addItem('⏰ Activar automatización total (00:05 + Sync cada 5 min)', 'instalarTriggersAutomaticos')
     .addItem('🔑 Configurar Gemini API Key', 'configurarApiKey')
@@ -108,6 +109,19 @@ function sincronizarGoogleTasksManual() {
       `Detalle: ${error.message}\n\nPara activarlo en 10 segundos:\n1. En el editor de Apps Script, mira la barra izquierda y haz clic en el símbolo "+" junto a "Servicios".\n2. Busca "Google Tasks API", selecciónalo y pulsa "Añadir".`,
       SpreadsheetApp.getUi().ButtonSet.OK
     );
+  }
+}
+
+function actualizarKpiMensualEnSheetManual() {
+  try {
+    const estado = obtenerEstadoDashboard();
+    SpreadsheetApp.getUi().alert(
+      '📊 KPI Mensual Actualizado en "Dashboard"',
+      `Se ha actualizado la tabla "📅 CUMPLIMIENTO POR MESES" en tu pestaña Dashboard (${estado.resumenGlobal.porMes.length} mes(es) registrados).`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } catch (error) {
+    SpreadsheetApp.getUi().alert('❌ Error al actualizar KPI mensual', error.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
 }
 
@@ -1216,20 +1230,32 @@ function obtenerEstadoDashboard() {
     snapshotDashboardSheet = sheetDashboard.getRange(1, 1, maxRows, maxCols).getDisplayValues();
   }
 
-  // Calcular resumen histórico de los últimos 7 días y por categoría desde Registro_Diario
+  // Calcular resumen histórico de los últimos 7 días, por mes y por categoría desde Registro_Diario
   const hace7Dias = new Date();
   hace7Dias.setDate(hace7Dias.getDate() - 6);
   const hace7DiasStr = obtenerFechaHoyStr_(hace7Dias);
+  const mesActualClave = hoyStr.substring(0, 7); // YYYY-MM
 
   let total7Dias = 0;
   let completados7Dias = 0;
   let totalHistorico = 0;
   let completadosHistorico = 0;
   const historicoPorCategoria = {};
+  const mapaMeses = {};
 
   CONFIG.CATEGORIAS.forEach(cat => {
     historicoPorCategoria[cat] = { total: 0, completados: 0, porcentaje: 0 };
   });
+
+  // Asegurar que el mes actual exista siempre en el desglose mensual
+  mapaMeses[mesActualClave] = {
+    clave: mesActualClave,
+    etiqueta: formatearEtiquetaMes_(mesActualClave),
+    total: 0,
+    completados: 0,
+    pendientes: 0,
+    porcentaje: 0
+  };
 
   for (let i = 1; i < data.length; i++) {
     const fechaFila = formatearCeldaFecha_(data[i][0]);
@@ -1238,6 +1264,7 @@ function obtenerEstadoDashboard() {
 
     const catFila = String(data[i][3] || 'Hogar').trim();
     const esCompletado = String(data[i][4] || '').trim().toLowerCase() === 'completado';
+    const claveMes = fechaFila.substring(0, 7);
 
     totalHistorico++;
     if (esCompletado) completadosHistorico++;
@@ -1252,12 +1279,57 @@ function obtenerEstadoDashboard() {
     }
     historicoPorCategoria[catFila].total++;
     if (esCompletado) historicoPorCategoria[catFila].completados++;
+
+    if (/^\d{4}-\d{2}$/.test(claveMes)) {
+      if (!mapaMeses[claveMes]) {
+        mapaMeses[claveMes] = {
+          clave: claveMes,
+          etiqueta: formatearEtiquetaMes_(claveMes),
+          total: 0,
+          completados: 0,
+          pendientes: 0,
+          porcentaje: 0
+        };
+      }
+      mapaMeses[claveMes].total++;
+      if (esCompletado) {
+        mapaMeses[claveMes].completados++;
+      } else {
+        mapaMeses[claveMes].pendientes++;
+      }
+    }
   }
 
   Object.keys(historicoPorCategoria).forEach(cat => {
     const itemCat = historicoPorCategoria[cat];
     itemCat.porcentaje = itemCat.total > 0 ? Math.round((itemCat.completados / itemCat.total) * 100) : 0;
   });
+
+  const listaPorMes = Object.keys(mapaMeses)
+    .sort((a, b) => b.localeCompare(a))
+    .map(k => {
+      const m = mapaMeses[k];
+      m.porcentaje = m.total > 0 ? Math.round((m.completados / m.total) * 100) : 0;
+      return m;
+    });
+
+  const statsMesActual = mapaMeses[mesActualClave] || {
+    clave: mesActualClave,
+    etiqueta: formatearEtiquetaMes_(mesActualClave),
+    total: 0,
+    completados: 0,
+    pendientes: 0,
+    porcentaje: 0
+  };
+
+  // Sincronizar automáticamente el bloque de KPI Mensual en la pestaña "Dashboard" de Google Sheets
+  if (sheetDashboard) {
+    try {
+      sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes);
+    } catch (e) {
+      Logger.log('Aviso sincronizando tabla mensual en hoja Dashboard: ' + e.message);
+    }
+  }
 
   const porcentaje7Dias = total7Dias > 0 ? Math.round((completados7Dias / total7Dias) * 100) : 0;
   const porcentajeHistorico = totalHistorico > 0 ? Math.round((completadosHistorico / totalHistorico) * 100) : 0;
@@ -1286,6 +1358,8 @@ function obtenerEstadoDashboard() {
         completados: completados7Dias,
         porcentaje: porcentaje7Dias
       },
+      mesActual: statsMesActual,
+      porMes: listaPorMes,
       historico: {
         total: totalHistorico,
         completados: completadosHistorico,
@@ -1297,6 +1371,103 @@ function obtenerEstadoDashboard() {
     vistaDashboard: snapshotDashboardSheet,
     sheetDashboardUrl: sheetDashboardUrl
   };
+}
+
+/**
+ * Convierte "2026-11" en "Noviembre 2026"
+ */
+function formatearEtiquetaMes_(claveMes) {
+  const nombresMeses = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
+  const partes = String(claveMes || '').split('-');
+  if (partes.length !== 2) return claveMes;
+  const anio = partes[0];
+  const idxMes = parseInt(partes[1], 10) - 1;
+  const nombre = nombresMeses[idxMes] || partes[1];
+  return `${nombre} ${anio}`;
+}
+
+/**
+ * Crea o actualiza en la pestaña "Dashboard" de Google Sheets una tabla formateada
+ * con el KPI de Completados por Meses sin pisar las tablas ni gráficos que ya tenga el usuario.
+ */
+function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
+  if (!sheetDashboard || !listaPorMes || listaPorMes.length === 0) return;
+
+  const tituloSeccion = '📅 CUMPLIMIENTO POR MESES';
+  const maxRows = Math.max(sheetDashboard.getLastRow(), 1);
+  const maxCols = Math.max(sheetDashboard.getLastColumn(), 1);
+  const valores = sheetDashboard.getRange(1, 1, maxRows, maxCols).getValues();
+
+  let filaInicio = -1;
+  let colInicio = -1;
+
+  // 1. Buscar si la tabla ya existe en la hoja Dashboard
+  for (let r = 0; r < valores.length; r++) {
+    for (let c = 0; c < valores[r].length; c++) {
+      if (String(valores[r][c] || '').trim() === tituloSeccion) {
+        filaInicio = r + 1;
+        colInicio = c + 1;
+        break;
+      }
+    }
+    if (filaInicio !== -1) break;
+  }
+
+  // 2. Si aún no existe, colocarla debajo del contenido actual (en columna A) dejando 2 filas de margen
+  if (filaInicio === -1) {
+    filaInicio = sheetDashboard.getLastRow() > 0 ? sheetDashboard.getLastRow() + 3 : 2;
+    colInicio = 1;
+  }
+
+  // Limpiar área previa de la tabla mensual (hasta 24 meses) para evitar restos antiguos
+  const rangoLimpieza = sheetDashboard.getRange(filaInicio, colInicio, 27, 5);
+  rangoLimpieza.clearContent();
+  rangoLimpieza.clearFormat();
+
+  // Título del bloque
+  const rangoTitulo = sheetDashboard.getRange(filaInicio, colInicio, 1, 5);
+  rangoTitulo.merge();
+  rangoTitulo.setValue(tituloSeccion)
+    .setBackground('#1E1B4B')
+    .setFontColor('#FFFFFF')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('left');
+
+  // Cabeceras de columnas
+  const cabeceras = [['Mes', 'Completados', 'Pendientes', 'Total Registros', '% Cumplimiento']];
+  const rangoCabeceras = sheetDashboard.getRange(filaInicio + 1, colInicio, 1, 5);
+  rangoCabeceras.setValues(cabeceras)
+    .setBackground('#EEF2FF')
+    .setFontColor('#1E1B4B')
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center');
+
+  // Filas por cada mes
+  const filasDatos = listaPorMes.slice(0, 24).map(m => [
+    m.etiqueta,
+    m.completados,
+    m.pendientes,
+    m.total,
+    m.total > 0 ? m.completados / m.total : 0
+  ]);
+
+  if (filasDatos.length > 0) {
+    const rangoDatos = sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 5);
+    rangoDatos.setValues(filasDatos);
+    sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 1).setFontWeight('bold');
+    sheetDashboard.getRange(filaInicio + 2, colInicio + 1, filasDatos.length, 3).setHorizontalAlignment('center');
+    sheetDashboard.getRange(filaInicio + 2, colInicio + 4, filasDatos.length, 1)
+      .setNumberFormat('0.0%')
+      .setHorizontalAlignment('center')
+      .setFontWeight('bold');
+  }
+
+  const totalFilasTabla = 2 + filasDatos.length;
+  sheetDashboard.getRange(filaInicio, colInicio, totalFilasTabla, 5)
+    .setBorder(true, true, true, true, true, true, '#CBD5E1', SpreadsheetApp.BorderStyle.SOLID);
 }
 
 /**
@@ -1636,7 +1807,7 @@ function obtenerHtmlApp_() {
     /* DASHBOARD TAB STYLES */
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 10px;
       margin-bottom: 16px;
     }
@@ -1843,11 +2014,21 @@ function obtenerHtmlApp_() {
           <div class="kpi-sub" id="kpiSemanaSub">0/0</div>
         </div>
         <div class="kpi-card">
+          <div class="kpi-val" id="kpiMesPct">0%</div>
+          <div class="kpi-lbl" id="kpiMesLbl">Este Mes</div>
+          <div class="kpi-sub" id="kpiMesSub">0/0</div>
+        </div>
+        <div class="kpi-card">
           <div class="kpi-val" id="kpiTotalPct">0%</div>
           <div class="kpi-lbl">Histórico</div>
           <div class="kpi-sub" id="kpiTotalSub">0/0</div>
         </div>
       </div>
+
+      <div class="section-title">
+        <span>📅 Completados por Meses</span>
+      </div>
+      <div class="cat-bar-card" id="dashboardMonthsBars"></div>
 
       <div class="section-title">
         <span>🏷️ Cumplimiento Histórico por Categoría</span>
@@ -2061,12 +2242,41 @@ function obtenerHtmlApp_() {
 
       if (dashboard.resumenGlobal) {
         const sem = dashboard.resumenGlobal.semana || { porcentaje: 0, completados: 0, total: 0 };
+        const mesAct = dashboard.resumenGlobal.mesActual || { etiqueta: 'Este Mes', porcentaje: 0, completados: 0, total: 0 };
         const hist = dashboard.resumenGlobal.historico || { porcentaje: 0, completados: 0, total: 0 };
+
         document.getElementById('kpiSemanaPct').textContent = \`\${sem.porcentaje}%\`;
         document.getElementById('kpiSemanaSub').textContent = \`\${sem.completados}/\${sem.total}\`;
+        document.getElementById('kpiMesPct').textContent = \`\${mesAct.porcentaje}%\`;
+        document.getElementById('kpiMesLbl').textContent = mesAct.etiqueta || 'Este Mes';
+        document.getElementById('kpiMesSub').textContent = \`\${mesAct.completados}/\${mesAct.total}\`;
         document.getElementById('kpiTotalPct').textContent = \`\${hist.porcentaje}%\`;
         document.getElementById('kpiTotalSub').textContent = \`\${hist.completados}/\${hist.total}\`;
 
+        // Barras de Completados por Meses
+        const monthsCont = document.getElementById('dashboardMonthsBars');
+        monthsCont.innerHTML = '';
+        const listaMeses = dashboard.resumenGlobal.porMes || [];
+        if (listaMeses.length === 0) {
+          monthsCont.innerHTML = '<div style="color:var(--muted);font-size:0.84rem;text-align:center;">Sin registros mensuales todavía.</div>';
+        } else {
+          listaMeses.forEach(itemM => {
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'cat-bar-row';
+            rowDiv.innerHTML = \`
+              <div class="cat-bar-header">
+                <span>🗓️ \${itemM.etiqueta}</span>
+                <span style="color:var(--muted);">\${itemM.completados}/\${itemM.total} completados (\${itemM.porcentaje}%)</span>
+              </div>
+              <div class="cat-bar-track">
+                <div class="cat-bar-fill" style="width: \${itemM.porcentaje}%"></div>
+              </div>
+            \`;
+            monthsCont.appendChild(rowDiv);
+          });
+        }
+
+        // Barras de Cumplimiento Histórico por Categoría
         const barsCont = document.getElementById('dashboardCatsBars');
         barsCont.innerHTML = '';
         const catsHist = dashboard.resumenGlobal.porCategoria || {};
