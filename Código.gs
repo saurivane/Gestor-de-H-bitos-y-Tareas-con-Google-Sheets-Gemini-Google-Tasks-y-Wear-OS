@@ -36,8 +36,32 @@ function onOpen() {
     .addItem('📊 3. Actualizar tabla KPI por Meses en hoja Dashboard', 'actualizarKpiMensualEnSheetManual')
     .addSeparator()
     .addItem('⏰ Activar automatización total (00:05 + Sync cada 5 min)', 'instalarTriggersAutomaticos')
+    .addItem('🎙️ Configurar alias de Asistente de Voz', 'configurarPrefijoAsistente')
     .addItem('🔑 Configurar Gemini API Key', 'configurarApiKey')
     .addToUi();
+}
+
+function configurarPrefijoAsistente() {
+  const ui = SpreadsheetApp.getUi();
+  const actual = PropertiesService.getScriptProperties().getProperty('VOICE_ASSISTANT_PREFIX') || '';
+  const res = ui.prompt(
+    '🎙️ Configurar alias de Asistente de Voz',
+    `Introduce el nombre o alias de tu asistente personalizado en Gemini${actual ? ` (Actual: "${actual}")` : ''}:\n\n` +
+    'Si configuras una regla en "Información guardada" de Gemini para que anteponga [TuAlias] al crear tareas en Google Tasks, el script las detectará automáticamente en cualquier lista de Google Tasks, las procesará y las moverá limpias a tu lista "Hábitos".\n' +
+    '(Déjalo en blanco si quieres desactivar el filtro por alias).',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (res.getSelectedButton() === ui.Button.OK) {
+    const alias = res.getResponseText().trim().replace(/^\[|\]$/g, '').trim();
+    if (alias) {
+      PropertiesService.getScriptProperties().setProperty('VOICE_ASSISTANT_PREFIX', alias);
+      ui.alert(`✅ Alias de asistente guardado como "${alias}".\n\nCualquier tarea que entre en Google Tasks con el prefijo "[${alias}]" o "${alias}:" será procesada automáticamente.`);
+    } else {
+      PropertiesService.getScriptProperties().deleteProperty('VOICE_ASSISTANT_PREFIX');
+      ui.alert('ℹ️ Se ha eliminado el alias de asistente personalizado.');
+    }
+  }
 }
 
 function configurarApiKey() {
@@ -134,6 +158,7 @@ function procesarOrdenGemini(textoUsuario) {
     throw new Error('No se ha configurado GEMINI_API_KEY. Usa el menú "⚡ Mi Gestor > Configurar Gemini API Key".');
   }
 
+  const textoLimpio = limpiarPrefijoAsistente_(textoUsuario).texto;
   const itemsHoy = obtenerNombresRegistradosHoy_();
   const contextoHoy = itemsHoy.length > 0
     ? `Elementos ya registrados hoy en la hoja: [${itemsHoy.join(', ')}]. Si el usuario se refiere a alguno de estos para completarlo o borrarlo, utiliza EXACTAMENTE ese mismo nombre.`
@@ -171,7 +196,7 @@ Reglas de negocio:
     contents: [
       {
         role: 'user',
-        parts: [{ text: textoUsuario }]
+        parts: [{ text: textoLimpio }]
       }
     ],
     generationConfig: {
@@ -605,8 +630,12 @@ function sincronizarBuzonGoogleTasks() {
 
     for (let i = 0; i < tasksItems.length; i++) {
       const t = tasksItems[i];
-      const titulo = (t.title || '').trim();
-      if (!titulo) continue;
+      const tituloRaw = (t.title || '').trim();
+      if (!tituloRaw) continue;
+
+      const infoPrefijo = limpiarPrefijoAsistente_(tituloRaw);
+      const titulo = infoPrefijo.texto || tituloRaw;
+      const tienePrefijoAsistente = infoPrefijo.teniaPrefijo;
 
       const tituloNorm = normalizarTexto_(titulo);
       const estaCompletadaEnTasks = (t.status === 'completed' || Boolean(t.completed));
@@ -621,13 +650,13 @@ function sincronizarBuzonGoogleTasks() {
       const itemSheet = buscarCoincidenciaEnSheet(tituloNorm);
 
       if (completadaEnDiaAnterior) {
-        if (infoLista.esPrincipalHabitos || itemSheet) {
+        if (infoLista.esPrincipalHabitos || itemSheet || tienePrefijoAsistente) {
           try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
         }
         continue;
       }
 
-      if (!infoLista.esPrincipalHabitos) {
+      if (!infoLista.esPrincipalHabitos && !tienePrefijoAsistente) {
         if (itemSheet && completadaHoyEnTasks) {
           if (itemSheet.estado.toLowerCase() !== 'completado') {
             sheetRegistro.getRange(itemSheet.indexFila, 5, 1, 2).setValues([['Completado', ahoraTimestamp]]);
@@ -640,7 +669,8 @@ function sincronizarBuzonGoogleTasks() {
       }
 
       if (itemSheet) {
-        if (completadaHoyEnTasks) {
+        const mencionaCompletarEnTitulo = tienePrefijoAsistente && /^(completad[oa]|hecho|terminad[oa]|ya\s+h[eé])\b/i.test(titulo);
+        if (completadaHoyEnTasks || mencionaCompletarEnTitulo) {
           if (itemSheet.estado.toLowerCase() !== 'completado') {
             sheetRegistro.getRange(itemSheet.indexFila, 5, 1, 2).setValues([['Completado', ahoraTimestamp]]);
             itemSheet.estado = 'Completado';
@@ -649,6 +679,9 @@ function sincronizarBuzonGoogleTasks() {
           try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
         } else if (!estaCompletadaEnTasks) {
           if (itemSheet.estado.toLowerCase() === 'completado') {
+            try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+          } else if (!infoLista.esPrincipalHabitos || tienePrefijoAsistente) {
+            // Si entró en lista secundaria con prefijo o tenía prefijo en el título, eliminamos la versión con prefijo para que se republique limpia en "Hábitos"
             try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
           } else {
             nombresEnTasksPendientesHoy.add(itemSheet.nombreNorm);
@@ -1646,6 +1679,34 @@ function normalizarTexto_(str) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^\w\s]/gi, '')
     .trim();
+}
+
+/**
+ * Detecta y limpia el prefijo/alias de asistente de voz configurado en PropertiesService ('VOICE_ASSISTANT_PREFIX').
+ * Soporta formatos como "[Alias] ...", "Alias: ...", "Alias, ..." o "Dile a Alias que ...".
+ */
+function limpiarPrefijoAsistente_(texto) {
+  const raw = String(texto || '').trim();
+  const alias = (PropertiesService.getScriptProperties().getProperty('VOICE_ASSISTANT_PREFIX') || '').trim();
+  if (!raw || !alias) {
+    return { texto: raw, teniaPrefijo: false };
+  }
+
+  const aliasEsc = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regexPrefijo = new RegExp(
+    `^(?:\\[${aliasEsc}\\]|(?:dile\\s+a\\s+|oye\\s+|hola\\s+)?${aliasEsc}(?:\\s+que\\s+|\\s*[,:\\-]\\s*|\\s+))(.*)$`,
+    'i'
+  );
+
+  const match = raw.match(regexPrefijo);
+  if (match && match[1]) {
+    return {
+      texto: match[1].trim(),
+      teniaPrefijo: true
+    };
+  }
+
+  return { texto: raw, teniaPrefijo: false };
 }
 
 function obtenerNombresRegistradosHoy_() {

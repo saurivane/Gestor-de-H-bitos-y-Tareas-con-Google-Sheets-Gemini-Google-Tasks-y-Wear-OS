@@ -158,6 +158,14 @@ Para que el script pueda sincronizarse con la app **Google Tasks** de tu móvil 
 | **Crear Hábito de Lunes a Viernes** | *"En Google Tasks, añade la tarea: **Hábito lunes a viernes meditar 10 minutos**"* | Lo da de alta en `Plantillas_Habitos` con frecuencia `L-V` y categoría `Salud`. |
 | **Eliminar una tarea de hoy** | *"En Google Tasks, añade la tarea: **Borra comprar pilas**"* | Elimina la fila correspondiente de hoy en `Registro_Diario` y la quita de Google Tasks. |
 
+### 🎙️ Opcional: Configurar un Alias de Asistente Personalizado (sin decir *"en Google Tasks"*)
+
+Si prefieres dirigirte a Gemini con un nombre o alias propio (por ejemplo, *"Asistente, añade hábito..."*) sin tener que pronunciar *"en Google Tasks"* ni depender de qué lista tengas en primera posición:
+
+1. En tu hoja de Google Sheets, abre el menú **`⚡ Mi Gestor` > `🎙️ Configurar alias de Asistente de Voz`** y escribe el alias que prefieras (se guarda de forma privada en `PropertiesService`).
+2. En la app de **Gemini** (*Foto de perfil > Información guardada* o en `gemini.google.com/saved-info`), añade una regla indicando que cuando uses ese alias para hábitos o tareas utilice siempre la extensión **`@Google Tasks`** y anteponga **`[TuAlias]`** al título de la tarea.
+3. El script detectará automáticamente cualquier tarea con el prefijo **`[TuAlias]`** en cualquiera de tus listas de Google Tasks, limpiará el prefijo, procesará la orden con IA y moverá la tarea limpia a tu lista **`"Hábitos"`**.
+
 ---
 
 ## 📁 Estructura del Repositorio
