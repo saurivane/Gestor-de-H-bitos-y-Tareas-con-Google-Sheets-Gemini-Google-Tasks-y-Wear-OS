@@ -1391,17 +1391,19 @@ function formatearEtiquetaMes_(claveMes) {
 
 /**
  * Crea o actualiza en la pestaña "Dashboard" de Google Sheets una tabla formateada
- * con el KPI de Completados por Meses sin pisar las tablas ni quedar oculta detrás de los gráficos flotantes.
+ * con el mismo estilo visual (tonos verde azulado #00695C / #E0F2F1) de la hoja y genera
+ * también su gráfico de barras agrupadas ("Tareas y Hábitos por Mes") con el mismo diseño.
  */
 function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
   if (!sheetDashboard || !listaPorMes || listaPorMes.length === 0) return;
 
   const tituloSeccion = '📅 CUMPLIMIENTO POR MESES';
+  const tituloGraficoMes = 'Tareas y Hábitos por Mes';
   const maxRows = Math.max(sheetDashboard.getLastRow(), 1);
   const maxCols = Math.max(sheetDashboard.getLastColumn(), 1);
   const valores = sheetDashboard.getRange(1, 1, maxRows, maxCols).getValues();
 
-  // 1. Detectar dónde acaban las celdas previas y dónde acaban los gráficos flotantes (EmbeddedCharts)
+  // 1. Detectar dónde acaban las celdas previas y dónde acaban los gráficos flotantes (ignorando el nuestro propio mensual)
   let ultimaFilaCeldasNoTabla = 1;
   let filaTablaPrevia = -1;
   let colTablaPrevia = -1;
@@ -1418,15 +1420,18 @@ function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
     }
   }
 
-  // Calcular la fila inferior que alcanzan los gráficos flotantes en la hoja Dashboard
   let maxFilaOcupadaPorGraficos = 0;
   try {
     const charts = sheetDashboard.getCharts();
     charts.forEach(ch => {
+      const opts = ch.getOptions();
+      const chTitle = opts ? String(opts.get('title') || '') : '';
+      if (chTitle === tituloGraficoMes) return; // Ignorar nuestro propio gráfico mensual al calcular el tope superior
+
       const info = ch.getContainerInfo();
       if (info) {
         const anchorRow = info.getAnchorRow() || 1;
-        const heightPx = (ch.getOptions() && ch.getOptions().get('height')) ? Number(ch.getOptions().get('height')) : 380;
+        const heightPx = (opts && opts.get('height')) ? Number(opts.get('height')) : 340;
         const filasAproxGrafico = Math.ceil(heightPx / 21) + 2;
         const finGrafico = anchorRow + filasAproxGrafico;
         if (finGrafico > maxFilaOcupadaPorGraficos) {
@@ -1438,47 +1443,52 @@ function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
 
   const filaMinimaSegura = Math.max(ultimaFilaCeldasNoTabla + 3, maxFilaOcupadaPorGraficos + 2);
 
-  // Si la tabla existía antes pero estaba metida debajo de un gráfico (fila < filaMinimaSegura), la limpiamos de ahí y la bajamos
   let filaInicio = filaTablaPrevia;
-  let colInicio = colTablaPrevia !== -1 ? colTablaPrevia : 1;
+  let colInicio = colTablaPrevia !== -1 ? colTablaPrevia : 2; // Empezar en Columna B (2) alineado con el gráfico de arriba
 
-  if (filaTablaPrevia !== -1 && filaTablaPrevia < filaMinimaSegura) {
-    const rangoAntiguo = sheetDashboard.getRange(filaTablaPrevia, colInicio, 27, 5);
+  if (filaTablaPrevia !== -1 && (filaTablaPrevia < filaMinimaSegura || colTablaPrevia !== 2)) {
+    const rangoAntiguo = sheetDashboard.getRange(filaTablaPrevia, colTablaPrevia, 27, 5);
     rangoAntiguo.breakApart();
     rangoAntiguo.clearContent();
     rangoAntiguo.clearFormat();
     filaInicio = filaMinimaSegura;
-    colInicio = 1;
+    colInicio = 2;
   } else if (filaInicio === -1) {
     filaInicio = filaMinimaSegura;
-    colInicio = 1;
+    colInicio = 2;
   }
 
-  // Limpiar área previa de la tabla mensual (hasta 24 meses) para evitar restos antiguos
+  // Limpiar área previa de la tabla mensual (hasta 24 meses)
   const rangoLimpieza = sheetDashboard.getRange(filaInicio, colInicio, 27, 5);
   rangoLimpieza.breakApart();
   rangoLimpieza.clearContent();
   rangoLimpieza.clearFormat();
 
+  // Paleta coherente con el resto del Dashboard de la hoja (Teal #00695C y menta suave #E0F2F1)
+  const colorHeaderBg = '#00695C';
+  const colorSubHeaderBg = '#E0F2F1';
+  const colorTealText = '#00695C';
+  const colorBorder = '#B2DFDB';
+
   // Título del bloque
   const rangoTitulo = sheetDashboard.getRange(filaInicio, colInicio, 1, 5);
   rangoTitulo.merge();
   rangoTitulo.setValue(tituloSeccion)
-    .setBackground('#1E1B4B')
+    .setBackground(colorHeaderBg)
     .setFontColor('#FFFFFF')
     .setFontWeight('bold')
     .setHorizontalAlignment('left');
 
   // Cabeceras de columnas
-  const cabeceras = [['Mes', 'Completados', 'Pendientes', 'Total Registros', '% Cumplimiento']];
+  const cabeceras = [['Mes', 'Completadas', 'Pendientes', 'Total', '% Cumplimiento']];
   const rangoCabeceras = sheetDashboard.getRange(filaInicio + 1, colInicio, 1, 5);
   rangoCabeceras.setValues(cabeceras)
-    .setBackground('#EEF2FF')
-    .setFontColor('#1E1B4B')
+    .setBackground(colorSubHeaderBg)
+    .setFontColor(colorTealText)
     .setFontWeight('bold')
     .setHorizontalAlignment('center');
 
-  // Filas por cada mes
+  // Filas por cada mes (escribimos el mes como texto explícito con apóstrofo inicial para que Sheets respete la mayúscula "Noviembre 2026")
   const filasDatos = listaPorMes.slice(0, 24).map(m => [
     m.etiqueta,
     m.completados,
@@ -1489,18 +1499,82 @@ function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
 
   if (filasDatos.length > 0) {
     const rangoDatos = sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 5);
+    sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 1).setNumberFormat('@');
     rangoDatos.setValues(filasDatos);
-    sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 1).setFontWeight('bold');
-    sheetDashboard.getRange(filaInicio + 2, colInicio + 1, filasDatos.length, 3).setHorizontalAlignment('center');
+
+    sheetDashboard.getRange(filaInicio + 2, colInicio, filasDatos.length, 1)
+      .setFontWeight('bold')
+      .setFontColor(colorTealText)
+      .setBackground('#F4FBF9')
+      .setHorizontalAlignment('left');
+
+    sheetDashboard.getRange(filaInicio + 2, colInicio + 1, filasDatos.length, 3)
+      .setHorizontalAlignment('center')
+      .setBackground('#FFFFFF');
+
     sheetDashboard.getRange(filaInicio + 2, colInicio + 4, filasDatos.length, 1)
       .setNumberFormat('0.0%')
       .setHorizontalAlignment('center')
-      .setFontWeight('bold');
+      .setFontWeight('bold')
+      .setFontColor(colorTealText)
+      .setBackground(colorSubHeaderBg);
   }
 
   const totalFilasTabla = 2 + filasDatos.length;
   sheetDashboard.getRange(filaInicio, colInicio, totalFilasTabla, 5)
-    .setBorder(true, true, true, true, true, true, '#CBD5E1', SpreadsheetApp.BorderStyle.SOLID);
+    .setBorder(true, true, true, true, true, true, colorBorder, SpreadsheetApp.BorderStyle.SOLID);
+
+  // 3. Crear o actualizar el Gráfico de Columnas Agrupadas ("Tareas y Hábitos por Mes") con el mismo estilo visual (#00695C y #DE7A61)
+  try {
+    const rangoGrafico = sheetDashboard.getRange(filaInicio + 1, colInicio, filasDatos.length + 1, 3); // Mes | Completadas | Pendientes
+    const charts = sheetDashboard.getCharts();
+    let chartExistente = null;
+
+    for (let i = 0; i < charts.length; i++) {
+      const opts = charts[i].getOptions();
+      if (opts && String(opts.get('title') || '') === tituloGraficoMes) {
+        chartExistente = charts[i];
+        break;
+      }
+    }
+
+    const colGrafico = colInicio + 6; // A la derecha de la tabla mensual (Columna H)
+    if (chartExistente) {
+      const modChart = chartExistente.modify()
+        .clearRanges()
+        .addRange(rangoGrafico)
+        .setChartType(Charts.ChartType.COLUMN)
+        .setPosition(filaInicio, colGrafico, 0, 0)
+        .setOption('title', tituloGraficoMes)
+        .setOption('titleTextStyle', { color: '#00695C', fontSize: 12, bold: true })
+        .setOption('colors', ['#00695C', '#DE7A61'])
+        .setOption('legend', { position: 'bottom' })
+        .setOption('hAxis', { title: 'Mes' })
+        .setOption('vAxis', { title: 'Cantidad', minValue: 0 })
+        .setOption('width', 450)
+        .setOption('height', 300)
+        .build();
+      sheetDashboard.updateChart(modChart);
+    } else {
+      const nuevoChart = sheetDashboard.newChart()
+        .addRange(rangoGrafico)
+        .setChartType(Charts.ChartType.COLUMN)
+        .setNumHeaders(1)
+        .setPosition(filaInicio, colGrafico, 0, 0)
+        .setOption('title', tituloGraficoMes)
+        .setOption('titleTextStyle', { color: '#00695C', fontSize: 12, bold: true })
+        .setOption('colors', ['#00695C', '#DE7A61'])
+        .setOption('legend', { position: 'bottom' })
+        .setOption('hAxis', { title: 'Mes' })
+        .setOption('vAxis', { title: 'Cantidad', minValue: 0 })
+        .setOption('width', 450)
+        .setOption('height', 300)
+        .build();
+      sheetDashboard.insertChart(nuevoChart);
+    }
+  } catch (errChart) {
+    Logger.log('Aviso creando gráfico mensual en Dashboard: ' + errChart.message);
+  }
 }
 
 /**
@@ -1900,6 +1974,99 @@ function obtenerHtmlApp_() {
       border-radius: 99px;
       transition: width 0.5s ease;
     }
+    /* GRÁFICO DE COLUMNAS AGRUPADAS (ESTILO SHEET TEAL & CORAL) */
+    .grouped-chart-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .grouped-chart-title {
+      font-size: 0.86rem;
+      font-weight: 800;
+      color: var(--accent);
+      margin-bottom: 14px;
+    }
+    .grouped-chart-bars {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-around;
+      gap: 10px;
+      height: 150px;
+      padding: 18px 8px 6px;
+      border-bottom: 1px solid var(--card-border);
+      overflow-x: auto;
+    }
+    .grouped-col-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 54px;
+      height: 100%;
+      justify-content: flex-end;
+    }
+    .grouped-pair {
+      display: flex;
+      align-items: flex-end;
+      gap: 5px;
+      height: 115px;
+    }
+    .bar-col-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      height: 100%;
+    }
+    .bar-col-val {
+      font-size: 0.66rem;
+      font-weight: 700;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .bar-col {
+      width: 16px;
+      border-radius: 5px 5px 0 0;
+      min-height: 4px;
+      transition: height 0.5s ease;
+    }
+    .bar-col.done-col {
+      background: #00695C;
+    }
+    .bar-col.pend-col {
+      background: #DE7A61;
+    }
+    .grouped-col-lbl {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-top: 7px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .grouped-col-pct {
+      font-size: 0.64rem;
+      font-weight: 800;
+      color: var(--accent);
+    }
+    .grouped-legend {
+      display: flex;
+      justify-content: center;
+      gap: 18px;
+      margin-top: 12px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .legend-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
     .sheet-link-btn {
       display: flex;
       align-items: center;
@@ -2061,10 +2228,26 @@ function obtenerHtmlApp_() {
       <div class="section-title">
         <span>📅 Completados por Meses</span>
       </div>
+      <div class="grouped-chart-card">
+        <div class="grouped-chart-title">📊 Tareas y Hábitos por Mes</div>
+        <div class="grouped-chart-bars" id="dashboardMonthsChart"></div>
+        <div class="grouped-legend">
+          <span><i class="legend-dot" style="background:#00695C;"></i>Completadas</span>
+          <span><i class="legend-dot" style="background:#DE7A61;"></i>Pendientes</span>
+        </div>
+      </div>
       <div class="cat-bar-card" id="dashboardMonthsBars"></div>
 
       <div class="section-title">
         <span>🏷️ Cumplimiento Histórico por Categoría</span>
+      </div>
+      <div class="grouped-chart-card">
+        <div class="grouped-chart-title">📊 Tareas y Hábitos por Categoría</div>
+        <div class="grouped-chart-bars" id="dashboardCatsChart"></div>
+        <div class="grouped-legend">
+          <span><i class="legend-dot" style="background:#00695C;"></i>Completadas</span>
+          <span><i class="legend-dot" style="background:#DE7A61;"></i>Pendientes</span>
+        </div>
       </div>
       <div class="cat-bar-card" id="dashboardCatsBars"></div>
     </div>
@@ -2286,13 +2469,48 @@ function obtenerHtmlApp_() {
         document.getElementById('kpiTotalPct').textContent = \`\${hist.porcentaje}%\`;
         document.getElementById('kpiTotalSub').textContent = \`\${hist.completados}/\${hist.total}\`;
 
-        // Barras de Completados por Meses
+        // Barras y Gráfico de Completados por Meses
         const monthsCont = document.getElementById('dashboardMonthsBars');
+        const monthsChart = document.getElementById('dashboardMonthsChart');
         monthsCont.innerHTML = '';
+        monthsChart.innerHTML = '';
         const listaMeses = dashboard.resumenGlobal.porMes || [];
         if (listaMeses.length === 0) {
           monthsCont.innerHTML = '<div style="color:var(--muted);font-size:0.84rem;text-align:center;">Sin registros mensuales todavía.</div>';
+          monthsChart.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;">Sin datos</div>';
         } else {
+          let maxValMes = 1;
+          listaMeses.forEach(m => {
+            const pend = Math.max(0, m.total - m.completados);
+            if (m.completados > maxValMes) maxValMes = m.completados;
+            if (pend > maxValMes) maxValMes = pend;
+          });
+
+          listaMeses.slice().reverse().forEach(itemM => {
+            const pendM = Math.max(0, itemM.total - itemM.completados);
+            const hDone = Math.max(4, Math.round((itemM.completados / maxValMes) * 90));
+            const hPend = Math.max(4, Math.round((pendM / maxValMes) * 90));
+            const etqCorta = String(itemM.etiqueta || '').replace(' 20', ' ').substring(0, 10);
+
+            const colEl = document.createElement('div');
+            colEl.className = 'grouped-col-item';
+            colEl.innerHTML = \`
+              <div class="grouped-pair">
+                <div class="bar-col-wrap">
+                  <span class="bar-col-val">\${itemM.completados}</span>
+                  <div class="bar-col done-col" style="height:\${hDone}px;" title="Completadas: \${itemM.completados}"></div>
+                </div>
+                <div class="bar-col-wrap">
+                  <span class="bar-col-val">\${pendM}</span>
+                  <div class="bar-col pend-col" style="height:\${hPend}px;" title="Pendientes: \${pendM}"></div>
+                </div>
+              </div>
+              <div class="grouped-col-lbl">\${etqCorta}</div>
+              <div class="grouped-col-pct">\${itemM.porcentaje}%</div>
+            \`;
+            monthsChart.appendChild(colEl);
+          });
+
           listaMeses.forEach(itemM => {
             const rowDiv = document.createElement('div');
             rowDiv.className = 'cat-bar-row';
@@ -2309,12 +2527,47 @@ function obtenerHtmlApp_() {
           });
         }
 
-        // Barras de Cumplimiento Histórico por Categoría
+        // Barras y Gráfico de Cumplimiento Histórico por Categoría
         const barsCont = document.getElementById('dashboardCatsBars');
+        const catsChart = document.getElementById('dashboardCatsChart');
         barsCont.innerHTML = '';
+        catsChart.innerHTML = '';
         const catsHist = dashboard.resumenGlobal.porCategoria || {};
-        Object.keys(catsHist).forEach(cat => {
+        const catsKeys = Object.keys(catsHist);
+
+        let maxValCat = 1;
+        catsKeys.forEach(cat => {
+          const c = catsHist[cat];
+          const pend = Math.max(0, c.total - c.completados);
+          if (c.completados > maxValCat) maxValCat = c.completados;
+          if (pend > maxValCat) maxValCat = pend;
+        });
+
+        catsKeys.forEach(cat => {
           const itemC = catsHist[cat];
+          const pendC = Math.max(0, itemC.total - itemC.completados);
+          const hDone = Math.max(4, Math.round((itemC.completados / maxValCat) * 90));
+          const hPend = Math.max(4, Math.round((pendC / maxValCat) * 90));
+          const catCorta = cat.length > 9 ? cat.substring(0, 8) + '…' : cat;
+
+          const colEl = document.createElement('div');
+          colEl.className = 'grouped-col-item';
+          colEl.innerHTML = \`
+            <div class="grouped-pair">
+              <div class="bar-col-wrap">
+                <span class="bar-col-val">\${itemC.completados}</span>
+                <div class="bar-col done-col" style="height:\${hDone}px;" title="Completadas: \${itemC.completados}"></div>
+              </div>
+              <div class="bar-col-wrap">
+                <span class="bar-col-val">\${pendC}</span>
+                <div class="bar-col pend-col" style="height:\${hPend}px;" title="Pendientes: \${pendC}"></div>
+              </div>
+            </div>
+            <div class="grouped-col-lbl">\${catCorta}</div>
+            <div class="grouped-col-pct">\${itemC.porcentaje}%</div>
+          \`;
+          catsChart.appendChild(colEl);
+
           const rowDiv = document.createElement('div');
           rowDiv.className = 'cat-bar-row';
           rowDiv.innerHTML = \`
