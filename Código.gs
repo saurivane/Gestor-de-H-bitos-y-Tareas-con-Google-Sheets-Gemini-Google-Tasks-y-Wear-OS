@@ -267,8 +267,7 @@ function ejecutarAccion(orden, opciones) {
         filaAfectada = encontradoHoyIndex;
         mensaje = `✅ "${nombreReal}" marcado como Completado.`;
       } else {
-        sheet.appendRow([hoyStr, tipo, nombre, categoria, 'Completado', ahoraTimestamp]);
-        filaAfectada = sheet.getLastRow();
+        filaAfectada = insertarEnPrimeraFilaLibre_(sheet, [hoyStr, tipo, nombre, categoria, 'Completado', ahoraTimestamp], 3);
         mensaje = `✅ Añadido y completado hoy: "${nombre}" (${categoria}).`;
       }
 
@@ -317,8 +316,7 @@ function ejecutarAccion(orden, opciones) {
       // Si es un Hábito y el día de hoy le aplica según su frecuencia (o se pidió explícitamente para hoy), lo insertamos en Registro_Diario
       const aplicaHoy = tipo === 'Tarea' || correspondeFrecuenciaHoy_(frecuencia, new Date().getDay()) || orden.forzarHoy === true;
       if (!existeHoy && aplicaHoy) {
-        sheet.appendRow([hoyStr, tipo, nombre, categoria, 'Pendiente', '']);
-        filaAfectada = sheet.getLastRow();
+        filaAfectada = insertarEnPrimeraFilaLibre_(sheet, [hoyStr, tipo, nombre, categoria, 'Pendiente', ''], 3);
         if (!opts.omitirSyncTasks) {
           asegurarPendienteEnGoogleTasks_(nombre, tipo, categoria);
         }
@@ -757,9 +755,14 @@ function generarHabitosDelDia() {
     }
 
     if (nuevasFilas.length > 0) {
-      const ultimaFila = sheetRegistro.getLastRow();
+      let ultimaConNombre = 1;
+      for (let i = 1; i < datosRegistro.length; i++) {
+        if (String(datosRegistro[i][2] || '').trim() !== '') {
+          ultimaConNombre = i + 1;
+        }
+      }
       sheetRegistro
-        .getRange(ultimaFila + 1, 1, nuevasFilas.length, nuevasFilas[0].length)
+        .getRange(ultimaConNombre + 1, 1, nuevasFilas.length, nuevasFilas[0].length)
         .setValues(nuevasFilas);
       SpreadsheetApp.flush();
     }
@@ -897,20 +900,39 @@ function eliminarDeGoogleTasks_(nombre) {
 function asegurarEnPlantillasHabitos_(sheetPlantillas, nombre, categoria, frecuencia, horaMomento) {
   const datos = sheetPlantillas.getDataRange().getValues();
   const norm = normalizarTexto_(nombre);
+
+  // 1. Compactar si hubiera filas huérfanas separadas por huecos en blanco (por antiguos appendRow)
+  const filasValidas = [];
   for (let i = 1; i < datos.length; i++) {
-    if (normalizarTexto_(String(datos[i][1])) === norm) {
-      return;
+    const nombreFila = String(datos[i][1] || '').trim();
+    if (nombreFila) {
+      const idxPrevia = filasValidas.findIndex(f => normalizarTexto_(String(f[1])) === normalizarTexto_(nombreFila));
+      if (idxPrevia === -1) {
+        filasValidas.push(datos[i]);
+      }
     }
   }
-  const nuevoId = `HAB-${String(datos.length).padStart(3, '0')}`;
-  sheetPlantillas.appendRow([
-    nuevoId,
-    nombre,
-    categoria || 'General',
-    frecuencia || 'Diaria',
-    horaMomento || 'Cualquier momento',
-    true
-  ]);
+
+  const yaExistia = filasValidas.some(f => normalizarTexto_(String(f[1])) === norm);
+  if (!yaExistia) {
+    const nuevoId = `HAB-${String(filasValidas.length + 1).padStart(3, '0')}`;
+    filasValidas.push([
+      nuevoId,
+      nombre,
+      categoria || 'General',
+      frecuencia || 'Diaria',
+      horaMomento || 'Cualquier momento',
+      true
+    ]);
+  }
+
+  // Limpiar contenido antiguo desde fila 2 y escribir todas las plantillas seguidas sin huecos
+  if (datos.length > 1) {
+    sheetPlantillas.getRange(2, 1, datos.length - 1, 6).clearContent();
+  }
+  if (filasValidas.length > 0) {
+    sheetPlantillas.getRange(2, 1, filasValidas.length, 6).setValues(filasValidas);
+  }
 }
 
 /**
@@ -1146,6 +1168,27 @@ function obtenerHojaFlexible_(ss, nombreBuscado) {
     }
   }
   return null;
+}
+
+/**
+ * Inserta una fila en la primera posición donde la columna clave (1-indexed) esté vacía,
+ * evitando que appendRow() escriba en la fila 500 o 1000 cuando hay validaciones/checkboxes vacíos.
+ */
+function insertarEnPrimeraFilaLibre_(sheet, valoresFila, colClaveIndex) {
+  const colCheck = colClaveIndex || 2; // Por defecto columna B o C
+  const data = sheet.getDataRange().getValues();
+  let ultimaOcupada = 1; // Cabecera
+
+  for (let i = 1; i < data.length; i++) {
+    const val = String(data[i][colCheck - 1] || '').trim();
+    if (val !== '') {
+      ultimaOcupada = i + 1;
+    }
+  }
+
+  const filaDestino = ultimaOcupada + 1;
+  sheet.getRange(filaDestino, 1, 1, valoresFila.length).setValues([valoresFila]);
+  return filaDestino;
 }
 
 function obtenerFechaHoyStr_(dateObj) {
