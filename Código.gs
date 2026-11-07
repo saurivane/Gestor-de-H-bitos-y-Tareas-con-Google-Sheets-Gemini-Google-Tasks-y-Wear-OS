@@ -369,7 +369,9 @@ function ejecutarAccion(orden, opciones) {
       }
 
       mensaje = tipo === 'Hábito'
-        ? `📌 Hábito "${nombre}" guardado en Plantillas (${frecuencia}) y añadido a hoy.`
+        ? (aplicaHoy
+            ? `📌 Hábito "${nombre}" guardado en Plantillas (${frecuencia}) y añadido a hoy.`
+            : `📌 Hábito "${nombre}" guardado en Plantillas (${frecuencia}). Se volcará en los días correspondientes.`)
         : `📌 Tarea "${nombre}" (${categoria}) añadida para hoy.`;
     }
 
@@ -567,7 +569,7 @@ function sincronizarBuzonGoogleTasks() {
   }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetRegistro = ss.getSheetByName(CONFIG.SHEETS.REGISTRO);
+  const sheetRegistro = obtenerHojaFlexible_(ss, CONFIG.SHEETS.REGISTRO);
   if (!sheetRegistro) throw new Error('No se encontró la hoja Registro_Diario.');
 
   const hoyStr = obtenerFechaHoyStr_();
@@ -607,13 +609,13 @@ function sincronizarBuzonGoogleTasks() {
     return null;
   }
 
-  const listasARevisar = [{ id: targetListId, esPrincipalHabitos: true }];
+  const listasARevisar = [{ id: targetListId, title: listaHabitos.title, esPrincipalHabitos: true }];
   try {
     const todasLasListasRes = Tasks.Tasklists.list({ maxResults: 100 });
     const todasLasListas = todasLasListasRes.items || [];
     todasLasListas.forEach(lista => {
       if (lista && lista.id && lista.id !== targetListId) {
-        listasARevisar.push({ id: lista.id, esPrincipalHabitos: false });
+        listasARevisar.push({ id: lista.id, title: lista.title || 'Secundaria', esPrincipalHabitos: false });
       }
     });
   } catch (e) {}
@@ -694,12 +696,15 @@ function sincronizarBuzonGoogleTasks() {
         try {
           const textoParaGemini = estaCompletadaEnTasks ? `Completado: ${titulo}` : titulo;
           const orden = procesarOrdenGemini(textoParaGemini);
+          if (orden.accion === 'CREAR') {
+            orden.forzarHoy = true; // Si el usuario lo acaba de crear hoy por voz, incluirlo también en hoy
+          }
           const resAccion = ejecutarAccion(orden, { omitirSyncTasks: true });
           detallesCambios.push(`🤖 IA ("${titulo}") → ${resAccion.mensaje}`);
 
           try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
 
-          if (orden.accion === 'CREAR') {
+          if (orden.accion === 'CREAR' && resAccion.filaAfectada) {
             itemsHoySheet.push({
               indexFila: resAccion.filaAfectada,
               tipo: orden.tipo,
@@ -710,6 +715,7 @@ function sincronizarBuzonGoogleTasks() {
             });
           }
         } catch (err) {
+          detallesCambios.push(`⚠️ Error procesando "${tituloRaw}": ${err.message}`);
           Logger.log(`Error interpretando tarea "${titulo}": ${err.message}`);
         }
       }
@@ -740,12 +746,13 @@ function sincronizarBuzonGoogleTasks() {
 
   SpreadsheetApp.flush();
 
+  const resumenListas = listasARevisar.map(l => l.title).join(', ');
   return {
     ok: true,
     cambios: detallesCambios.length,
     mensaje: detallesCambios.length > 0
       ? detallesCambios.join('\n')
-      : `Sincronización verificada en lista "${listaHabitos.title}" (${itemsHoySheet.length} hábitos hoy en hoja). No se detectaron cambios nuevos.`
+      : `Sincronización verificada en listas [${resumenListas}] (${itemsHoySheet.length} hábitos hoy en hoja). No se detectaron cambios nuevos.`
   };
 }
 
@@ -1696,11 +1703,10 @@ function limpiarPrefijoAsistente_(texto) {
 
   const alias = (PropertiesService.getScriptProperties().getProperty('VOICE_ASSISTANT_PREFIX') || '').trim();
 
-  // 1. Si empieza por etiqueta explícita entre corchetes "[Algo] ..." (por ej. "[Jarvis] ..."), la detectamos siempre
-  const matchCorchetes = raw.match(/^\[([^\]]+)\]\s*[,:\-]?\s*(.+)$/);
+  // 1. Si empieza por etiqueta explícita entre corchetes "[Algo] ...", paréntesis "(Algo) ..." o asteriscos "**[Algo]** ..."
+  const matchCorchetes = raw.match(/^[\*\s]*[\[\(]([^\]\)]+)[\]\)][\*\s]*[,:\-]?\s*(.+)$/);
   if (matchCorchetes && matchCorchetes[2]) {
     const tagInterior = matchCorchetes[1].trim().toLowerCase();
-    // Evitar confundir con "[Hábito]" si el usuario dictó literalmente "[Hábito]"
     if (tagInterior !== 'habito' && tagInterior !== 'hábito' && tagInterior !== 'tarea') {
       return {
         texto: matchCorchetes[2].trim(),
