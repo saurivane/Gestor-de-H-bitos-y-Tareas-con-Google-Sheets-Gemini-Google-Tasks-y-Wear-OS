@@ -1203,38 +1203,78 @@ function respuestaJson_(obj) {
 
 /**
  * ============================================================================
- * 7. INTERFAZ WEB CON CRUD COMPLETO (HOY + CATÁLOGO DE HÁBITOS + MODO RELOJ)
+ * 7. INTERFAZ WEB CON CRUD COMPLETO + SELECTOR DE TEMA (DARK / LIGHT / SYSTEM) + MODO RELOJ
  * ============================================================================
  */
 function obtenerHtmlApp_() {
   return `<!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#0B0F19">
+  <meta name="theme-color" content="#0B0F19" id="metaThemeColor">
   <title>⚡ Mi Gestor</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --bg: #0B0F19;
+    :root, [data-theme="dark"] {
+      --bg-grad: radial-gradient(circle at top right, #1E1B4B, #0B0F19 60%);
       --card: rgba(22, 30, 49, 0.88);
       --card-border: rgba(255, 255, 255, 0.09);
+      --tabs-bg: rgba(15, 23, 42, 0.75);
       --primary: #6366F1;
       --primary-glow: rgba(99, 102, 241, 0.35);
       --accent: #10B981;
       --danger: #EF4444;
       --text: #F8FAFC;
       --muted: #94A3B8;
+      --title-grad: linear-gradient(90deg, #FFF, #A5B4FC);
+      --ring-track: rgba(255, 255, 255, 0.08);
+      --badge-bg: rgba(255, 255, 255, 0.07);
+      --act-btn-bg: rgba(255, 255, 255, 0.05);
+      --act-btn-hover: rgba(255, 255, 255, 0.14);
+      --modal-bg: #131B2E;
+      --input-bg: #0B0F19;
+      --toast-bg: rgba(15, 23, 42, 0.96);
+      --shadow-hero: 0 12px 32px rgba(0, 0, 0, 0.35);
+      --cat-pct: #A5B4FC;
+      --sync-pill-bg: rgba(99, 102, 241, 0.16);
+      --sync-pill-text: #C7D2FE;
     }
+
+    [data-theme="light"] {
+      --bg-grad: radial-gradient(circle at top right, #E0E7FF, #F8FAFC 65%);
+      --card: rgba(255, 255, 255, 0.92);
+      --card-border: rgba(15, 23, 42, 0.09);
+      --tabs-bg: rgba(226, 232, 240, 0.85);
+      --primary: #4F46E5;
+      --primary-glow: rgba(79, 70, 229, 0.25);
+      --accent: #059669;
+      --danger: #DC2626;
+      --text: #0F172A;
+      --muted: #64748B;
+      --title-grad: linear-gradient(90deg, #1E1B4B, #4F46E5);
+      --ring-track: rgba(15, 23, 42, 0.08);
+      --badge-bg: rgba(15, 23, 42, 0.06);
+      --act-btn-bg: rgba(15, 23, 42, 0.05);
+      --act-btn-hover: rgba(15, 23, 42, 0.12);
+      --modal-bg: #FFFFFF;
+      --input-bg: #F1F5F9;
+      --toast-bg: rgba(15, 23, 42, 0.92);
+      --shadow-hero: 0 10px 28px rgba(15, 23, 42, 0.08);
+      --cat-pct: #4F46E5;
+      --sync-pill-bg: rgba(79, 70, 229, 0.12);
+      --sync-pill-text: #4338CA;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
       font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: radial-gradient(circle at top right, #1E1B4B, #0B0F19 60%);
+      background: var(--bg-grad);
       color: var(--text);
       min-height: 100vh;
       padding: 16px;
       padding-bottom: 100px;
+      transition: background 0.25s ease, color 0.25s ease;
     }
     .container { max-width: 500px; margin: 0 auto; }
 
@@ -1242,20 +1282,25 @@ function obtenerHtmlApp_() {
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
     .title-group h1 {
       font-size: 1.35rem; font-weight: 800;
-      background: linear-gradient(90deg, #FFF, #A5B4FC);
+      background: var(--title-grad);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     }
     .title-group p { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
-    .top-actions { display: flex; gap: 8px; }
+    .top-actions { display: flex; gap: 6px; align-items: center; }
     .icon-btn {
       background: var(--card); border: 1px solid var(--card-border); color: var(--text);
-      width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center;
-      justify-content: center; font-size: 1.05rem; cursor: pointer;
+      width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center;
+      justify-content: center; font-size: 1rem; cursor: pointer;
+      transition: transform 0.15s ease, background 0.2s;
+    }
+    .icon-btn:active { transform: scale(0.92); }
+    .theme-btn {
+      width: auto; padding: 0 10px; gap: 5px; font-size: 0.75rem; font-weight: 700;
     }
 
     /* TABS NAVIGATION */
     .nav-tabs {
-      display: flex; gap: 8px; background: rgba(15, 23, 42, 0.75);
+      display: flex; gap: 8px; background: var(--tabs-bg);
       padding: 5px; border-radius: 16px; border: 1px solid var(--card-border);
       margin-bottom: 16px;
     }
@@ -1273,11 +1318,11 @@ function obtenerHtmlApp_() {
     .hero-card {
       background: var(--card); backdrop-filter: blur(16px); border: 1px solid var(--card-border);
       border-radius: 24px; padding: 18px; display: flex; align-items: center; gap: 18px;
-      margin-bottom: 16px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+      margin-bottom: 16px; box-shadow: var(--shadow-hero);
     }
     .ring-wrap { position: relative; width: 92px; height: 92px; flex-shrink: 0; }
     .ring-svg { transform: rotate(-90deg); width: 92px; height: 92px; }
-    .ring-bg { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 9; }
+    .ring-bg { fill: none; stroke: var(--ring-track); stroke-width: 9; }
     .ring-progress {
       fill: none; stroke: url(#gradRing); stroke-width: 9; stroke-linecap: round;
       stroke-dasharray: 238.76; stroke-dashoffset: 238.76;
@@ -1291,8 +1336,8 @@ function obtenerHtmlApp_() {
     .hero-info p { font-size: 0.78rem; color: var(--muted); margin-bottom: 10px; }
     .sync-pill {
       display: inline-flex; align-items: center; gap: 6px; font-size: 0.74rem; font-weight: 600;
-      padding: 6px 12px; border-radius: 99px; background: rgba(99, 102, 241, 0.16);
-      color: #C7D2FE; border: 1px solid rgba(99, 102, 241, 0.35); cursor: pointer;
+      padding: 6px 12px; border-radius: 99px; background: var(--sync-pill-bg);
+      color: var(--sync-pill-text); border: 1px solid rgba(99, 102, 241, 0.35); cursor: pointer;
     }
 
     /* CATEGORIES BAR */
@@ -1302,7 +1347,7 @@ function obtenerHtmlApp_() {
       background: var(--card); border: 1px solid var(--card-border); padding: 7px 12px;
       border-radius: 12px; font-size: 0.74rem; white-space: nowrap; display: flex; align-items: center; gap: 6px;
     }
-    .cat-pct { font-weight: 800; color: #A5B4FC; }
+    .cat-pct { font-weight: 800; color: var(--cat-pct); }
 
     /* LISTS */
     .section-title {
@@ -1313,34 +1358,35 @@ function obtenerHtmlApp_() {
     .task-item {
       background: var(--card); border: 1px solid var(--card-border); border-radius: 18px;
       padding: 13px 15px; display: flex; align-items: center; gap: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
     }
-    .task-item.done { opacity: 0.62; background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.22); }
+    .task-item.done { opacity: 0.65; background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.25); }
     .task-item.paused { opacity: 0.5; }
     .check-circle {
-      width: 28px; height: 28px; border-radius: 50%; border: 2px solid #6366F1;
+      width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--primary);
       display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; font-size: 0.9rem;
     }
-    .task-item.done .check-circle { background: var(--accent); border-color: var(--accent); color: #052E16; font-weight: 900; }
+    .task-item.done .check-circle { background: var(--accent); border-color: var(--accent); color: #FFFFFF; font-weight: 900; }
     .task-content { flex: 1; min-width: 0; cursor: pointer; }
     .task-name { font-size: 0.94rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .task-item.done .task-name { text-decoration: line-through; color: var(--muted); }
     .task-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; font-size: 0.69rem; color: var(--muted); }
-    .badge { padding: 2px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.07); font-weight: 600; }
+    .badge { padding: 2px 8px; border-radius: 6px; background: var(--badge-bg); font-weight: 600; }
     .item-actions { display: flex; gap: 4px; align-items: center; }
     .act-btn {
-      background: rgba(255, 255, 255, 0.05); border: none; color: #94A3B8;
+      background: var(--act-btn-bg); border: none; color: var(--muted);
       width: 32px; height: 32px; border-radius: 10px; font-size: 0.88rem;
       cursor: pointer; display: flex; align-items: center; justify-content: center;
     }
-    .act-btn:hover { background: rgba(255, 255, 255, 0.12); color: white; }
+    .act-btn:hover { background: var(--act-btn-hover); color: var(--text); }
 
     /* TOGGLE SWITCH PARA PLANTILLAS */
     .switch-btn {
       padding: 4px 10px; border-radius: 99px; font-size: 0.7rem; font-weight: 700;
       border: none; cursor: pointer;
     }
-    .switch-btn.on { background: rgba(16, 185, 129, 0.2); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.4); }
-    .switch-btn.off { background: rgba(148, 163, 184, 0.15); color: #94A3B8; border: 1px solid rgba(148, 163, 184, 0.3); }
+    .switch-btn.on { background: rgba(16, 185, 129, 0.18); color: var(--accent); border: 1px solid rgba(16, 185, 129, 0.4); }
+    .switch-btn.off { background: rgba(148, 163, 184, 0.15); color: var(--muted); border: 1px solid rgba(148, 163, 184, 0.3); }
 
     /* FLOATING ACTION BUTTON (+) */
     .fab {
@@ -1355,23 +1401,23 @@ function obtenerHtmlApp_() {
 
     /* MODAL CRUD */
     .modal-backdrop {
-      position: fixed; inset: 0; background: rgba(5, 8, 17, 0.8);
+      position: fixed; inset: 0; background: rgba(5, 8, 17, 0.75);
       backdrop-filter: blur(6px); display: none; align-items: center;
       justify-content: center; padding: 16px; z-index: 200;
     }
     .modal-backdrop.open { display: flex; }
     .modal-card {
-      background: #131B2E; border: 1px solid rgba(255, 255, 255, 0.12);
+      background: var(--modal-bg); border: 1px solid var(--card-border);
       border-radius: 24px; width: 100%; max-width: 420px; padding: 22px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
     }
-    .modal-title { font-size: 1.1rem; font-weight: 800; margin-bottom: 16px; }
+    .modal-title { font-size: 1.1rem; font-weight: 800; margin-bottom: 16px; color: var(--text); }
     .form-group { margin-bottom: 14px; }
     .form-group label { display: block; font-size: 0.76rem; color: var(--muted); font-weight: 700; margin-bottom: 6px; }
     .form-control {
       width: 100%; padding: 11px 14px; border-radius: 12px;
-      background: #0B0F19; border: 1px solid rgba(255, 255, 255, 0.12);
-      color: white; font-family: inherit; font-size: 0.9rem; outline: none;
+      background: var(--input-bg); border: 1px solid var(--card-border);
+      color: var(--text); font-family: inherit; font-size: 0.9rem; outline: none;
     }
     .form-control:focus { border-color: var(--primary); }
     .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
@@ -1379,26 +1425,26 @@ function obtenerHtmlApp_() {
       padding: 10px 18px; border-radius: 12px; font-family: inherit;
       font-weight: 700; font-size: 0.86rem; border: none; cursor: pointer;
     }
-    .btn-cancel { background: rgba(255, 255, 255, 0.08); color: var(--muted); }
+    .btn-cancel { background: var(--badge-bg); color: var(--muted); }
     .btn-save { background: var(--primary); color: white; }
 
     /* TOAST */
     .toast {
       position: fixed; bottom: 85px; left: 50%; transform: translateX(-50%) translateY(120px);
-      background: rgba(15, 23, 42, 0.96); border: 1px solid rgba(99, 102, 241, 0.45); color: white;
+      background: var(--toast-bg); border: 1px solid rgba(99, 102, 241, 0.45); color: white;
       padding: 11px 18px; border-radius: 14px; font-size: 0.84rem; font-weight: 600;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.5); transition: transform 0.28s ease;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4); transition: transform 0.28s ease;
       z-index: 300; max-width: 90vw; text-align: center; pointer-events: none;
     }
     .toast.show { transform: translateX(-50%) translateY(0); }
 
     /* MODO RELOJ WEAR OS */
-    body.watch-mode { background: #000000; padding: 10px 8px 36px; }
+    body.watch-mode { background: #000000 !important; color: #F8FAFC !important; padding: 10px 8px 36px; }
     body.watch-mode .container { max-width: 230px; text-align: center; }
     body.watch-mode .header, body.watch-mode .nav-tabs, body.watch-mode .cats-scroll,
     body.watch-mode .hero-info p, body.watch-mode .item-actions, body.watch-mode .fab { display: none !important; }
     body.watch-mode .hero-card { flex-direction: column; background: transparent; border: none; padding: 4px; gap: 8px; margin-bottom: 8px; box-shadow: none; }
-    body.watch-mode .task-item { padding: 10px 12px; border-radius: 99px; text-align: left; }
+    body.watch-mode .task-item { padding: 10px 12px; border-radius: 99px; text-align: left; background: rgba(22, 30, 49, 0.9); color: #F8FAFC; }
     body.watch-mode .task-meta { display: none; }
   </style>
 </head>
@@ -1411,6 +1457,10 @@ function obtenerHtmlApp_() {
         <p id="dateSubtitle">Sincronizado con Google Tasks</p>
       </div>
       <div class="top-actions">
+        <button class="icon-btn theme-btn" id="themeBtn" onclick="ciclarModoTema()" title="Cambiar tema: Oscuro / Claro / Sistema">
+          <span id="themeIcon">🖥️</span>
+          <span id="themeLabel">Auto</span>
+        </button>
         <button class="icon-btn" onclick="abrirModalCrear()" title="Añadir nuevo">➕</button>
         <button class="icon-btn" onclick="document.body.classList.toggle('watch-mode')" title="Modo Reloj">⌚</button>
         <button class="icon-btn" onclick="cargarDatos()" title="Sincronizar ahora">🔄</button>
@@ -1543,6 +1593,54 @@ function obtenerHtmlApp_() {
     let tabActual = 'hoy';
     let ultimoDashboard = null;
 
+    /* ==================== GESTIÓN DE TEMA (DARK / LIGHT / SYSTEM) ==================== */
+    const THEME_MODES = ['system', 'dark', 'light'];
+    let currentThemeMode = localStorage.getItem('gestor_theme_mode') || 'system';
+    const systemDarkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+    function aplicarModoTema(modo, mostrarAviso) {
+      currentThemeMode = modo;
+      localStorage.setItem('gestor_theme_mode', modo);
+
+      const effectiveTheme = modo === 'system'
+        ? (systemDarkQuery.matches ? 'dark' : 'light')
+        : modo;
+
+      document.documentElement.setAttribute('data-theme', effectiveTheme);
+      const metaTheme = document.getElementById('metaThemeColor');
+      if (metaTheme) {
+        metaTheme.setAttribute('content', effectiveTheme === 'dark' ? '#0B0F19' : '#F8FAFC');
+      }
+
+      const iconEl = document.getElementById('themeIcon');
+      const labelEl = document.getElementById('themeLabel');
+      if (modo === 'system') {
+        iconEl.textContent = '🖥️';
+        labelEl.textContent = 'Auto';
+        if (mostrarAviso) mostrarToast('🖥️ Tema: Automático del sistema');
+      } else if (modo === 'dark') {
+        iconEl.textContent = '🌙';
+        labelEl.textContent = 'Oscuro';
+        if (mostrarAviso) mostrarToast('🌙 Tema: Modo Oscuro');
+      } else {
+        iconEl.textContent = '☀️';
+        labelEl.textContent = 'Claro';
+        if (mostrarAviso) mostrarToast('☀️ Tema: Modo Claro');
+      }
+    }
+
+    function ciclarModoTema() {
+      const nextIndex = (THEME_MODES.indexOf(currentThemeMode) + 1) % THEME_MODES.length;
+      aplicarModoTema(THEME_MODES[nextIndex], true);
+    }
+
+    if (systemDarkQuery.addEventListener) {
+      systemDarkQuery.addEventListener('change', () => {
+        if (currentThemeMode === 'system') aplicarModoTema('system', false);
+      });
+    }
+    aplicarModoTema(currentThemeMode, false);
+
     if (window.innerWidth <= 280 || window.location.search.includes('watch')) {
       document.body.classList.add('watch-mode');
     }
@@ -1601,7 +1699,7 @@ function obtenerHtmlApp_() {
       const pendList = document.getElementById('pendientesList');
       pendList.innerHTML = '';
       if (h.pendientes.length === 0) {
-        pendList.innerHTML = '<div style="color:#64748B;font-size:0.85rem;text-align:center;padding:14px;">🎉 ¡Todo al día!</div>';
+        pendList.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;text-align:center;padding:14px;">🎉 ¡Todo al día!</div>';
       } else {
         h.pendientes.forEach(item => pendList.appendChild(crearFilaHoy(item, false)));
       }
@@ -1616,7 +1714,7 @@ function obtenerHtmlApp_() {
       const plantList = document.getElementById('plantillasList');
       plantList.innerHTML = '';
       if (plantillas.length === 0) {
-        plantList.innerHTML = '<div style="color:#64748B;font-size:0.85rem;text-align:center;padding:14px;">No hay hábitos en Plantillas_Habitos.</div>';
+        plantList.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;text-align:center;padding:14px;">No hay hábitos en Plantillas_Habitos.</div>';
       } else {
         plantillas.forEach(p => plantList.appendChild(crearFilaPlantilla(p)));
       }

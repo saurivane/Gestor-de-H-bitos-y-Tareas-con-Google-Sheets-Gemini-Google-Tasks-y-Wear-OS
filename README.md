@@ -14,7 +14,8 @@ Sistema **Serverless y 100% gratuito** construido sobre el ecosistema de Google 
   * Publica automáticamente tus hábitos y tareas pendientes del día en una lista dedicada (`"Hábitos"`) en Google Tasks.
   * Al marcar el check `✓` desde el widget de Google Tasks en tu teléfono o reloj (o al pedírselo por voz al asistente), el script actualiza el estado a `Completado` con marca de tiempo (`YYYY-MM-DD HH:mm:ss`) en tu hoja de cálculo.
   * Incluye protección **anti-duplicados y anti-fantasmas**: ignora y limpia tareas completadas en días anteriores para no contaminar el progreso del día actual.
-* 📱⌚ **Web App Adaptativa con CRUD Completo:**
+* 📱⌚ **Web App Adaptativa con CRUD Completo y Selector de Tema (`Dark` / `Light` / `System`):**
+  * **Selector de visualización (`🌙 Oscuro` / `☀️ Claro` / `🖥️ Auto`):** Botón en la barra superior que alterna entre modo oscuro, modo claro y detección automática del tema del sistema operativo (`prefers-color-scheme`), recordando tu preferencia en el dispositivo.
   * **Pestaña `📅 Hoy`:** Anillo de progreso circular en vivo, progreso por categorías y lista interactiva para completar, reabrir, editar (`✏️`) o eliminar (`🗑️`) registros del día.
   * **Pestaña `⚙️ Catálogo Hábitos`:** Gestión directa de la hoja `Plantillas_Habitos` para crear nuevos hábitos recurrentes, editar su frecuencia/categoría, pausarlos temporalmente (`Activo` / `Pausado`) o eliminarlos.
   * **Modo Reloj (`?view=watch`):** Interfaz minimalista con fondo negro puro AMOLED optimizada para pantallas redondas o cuadradas de relojes inteligentes.
