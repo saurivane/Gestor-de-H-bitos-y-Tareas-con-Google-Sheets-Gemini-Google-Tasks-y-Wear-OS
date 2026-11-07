@@ -650,7 +650,7 @@ function sincronizarBuzonGoogleTasks() {
       const completadaHoyEnTasks = estaCompletadaEnTasks && (fechaCompletadoTaskStr === hoyStr);
       const completadaEnDiaAnterior = estaCompletadaEnTasks && (fechaCompletadoTaskStr !== '' && fechaCompletadoTaskStr !== hoyStr);
 
-      const itemSheet = buscarCoincidenciaEnSheet(tituloNorm);
+      const itemSheet = tienePrefijoAsistente ? null : buscarCoincidenciaEnSheet(tituloNorm);
 
       if (completadaEnDiaAnterior) {
         if (infoLista.esPrincipalHabitos || itemSheet || tienePrefijoAsistente) {
