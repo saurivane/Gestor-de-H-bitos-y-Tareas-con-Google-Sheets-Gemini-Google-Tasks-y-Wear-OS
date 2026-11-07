@@ -1853,11 +1853,6 @@ function obtenerHtmlApp_() {
         <span>🏷️ Cumplimiento Histórico por Categoría</span>
       </div>
       <div class="cat-bar-card" id="dashboardCatsBars"></div>
-
-      <div class="section-title">
-        <span>📋 Vista en vivo de tu pestaña "Dashboard"</span>
-      </div>
-      <div class="sheet-table-wrap" id="dashboardRawTable"></div>
     </div>
   </div>
 
@@ -2090,36 +2085,6 @@ function obtenerHtmlApp_() {
           \`;
           barsCont.appendChild(rowDiv);
         });
-      }
-
-      // Renderizar tabla en vivo de las celdas de la pestaña "Dashboard" de Google Sheets
-      const rawTableWrap = document.getElementById('dashboardRawTable');
-      rawTableWrap.innerHTML = '';
-      const matriz = dashboard.vistaDashboard || [];
-      const filasConDatos = matriz.filter(fila => fila.some(celda => String(celda || '').trim() !== ''));
-
-      if (filasConDatos.length === 0) {
-        rawTableWrap.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:10px;">La pestaña Dashboard no contiene celdas de texto adicionales.</div>';
-      } else {
-        const table = document.createElement('table');
-        table.className = 'sheet-table';
-        filasConDatos.forEach(fila => {
-          // Recortar columnas vacías al final de cada fila
-          let ultimoIndiceNoVacio = -1;
-          fila.forEach((celda, idx) => {
-            if (String(celda || '').trim() !== '') ultimoIndiceNoVacio = idx;
-          });
-          if (ultimoIndiceNoVacio === -1) return;
-
-          const tr = document.createElement('tr');
-          for (let c = 0; c <= ultimoIndiceNoVacio; c++) {
-            const td = document.createElement('td');
-            td.textContent = fila[c] || '';
-            tr.appendChild(td);
-          }
-          table.appendChild(tr);
-        });
-        rawTableWrap.appendChild(table);
       }
     }
 
