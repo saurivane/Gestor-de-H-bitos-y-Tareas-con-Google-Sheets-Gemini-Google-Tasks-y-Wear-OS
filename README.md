@@ -60,10 +60,10 @@ Catálogo maestro de hábitos recurrentes que se volcarán automáticamente cada
 
 | A: `ID` | B: `Nombre` | C: `Categoría` | D: `Frecuencia` | E: `Hora/Momento` | F: `Activo` |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `HAB-001` | Entrenar fuerza | Salud | L-V | Mañana | `TRUE` |
-| `HAB-002` | Leer 20 páginas | Estudio | Diaria | Noche | `TRUE` |
-| `HAB-003` | Revisar presupuesto | Finanzas | Semanal | Domingo | `TRUE` |
-| `HAB-004` | Limpieza general | Hogar | Fin de semana | Mañana | `TRUE` |
+| `H01` | Entrenar fuerza | Salud | L-V | Mañana | `TRUE` |
+| `H02` | Leer 20 páginas | Estudio | Diaria | Noche | `TRUE` |
+| `H03` | Revisar presupuesto | Finanzas | Semanal | Domingo | `TRUE` |
+| `H04` | Limpieza general | Hogar | Fin de semana | Mañana | `TRUE` |
 
 * **Valores admitidos en `Frecuencia`:** `Diaria`, `L-V` (Lunes a Viernes), `Fin de semana` (Sábado y Domingo), `Semanal` (por defecto Lunes, o indicando el día entre paréntesis como `Semanal (Miércoles)`).
 * **Valores admitidos en `Activo`:** `TRUE` / `FALSE` (o casilla de verificación de Google Sheets).

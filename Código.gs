@@ -901,21 +901,42 @@ function asegurarEnPlantillasHabitos_(sheetPlantillas, nombre, categoria, frecue
   const datos = sheetPlantillas.getDataRange().getValues();
   const norm = normalizarTexto_(nombre);
 
-  // 1. Compactar si hubiera filas huérfanas separadas por huecos en blanco (por antiguos appendRow)
+  // 1. Recoger todas las filas reales con nombre y compactar huecos en blanco
   const filasValidas = [];
+  let maxNumeroId = 0;
+
   for (let i = 1; i < datos.length; i++) {
     const nombreFila = String(datos[i][1] || '').trim();
     if (nombreFila) {
       const idxPrevia = filasValidas.findIndex(f => normalizarTexto_(String(f[1])) === normalizarTexto_(nombreFila));
       if (idxPrevia === -1) {
-        filasValidas.push(datos[i]);
+        const filaCopia = [...datos[i]];
+        const idActual = String(filaCopia[0] || '').trim();
+
+        // Extraer el número si sigue el formato H01, H05, etc.
+        const matchH = idActual.match(/^H(\d+)$/i);
+        if (matchH) {
+          const num = parseInt(matchH[1], 10);
+          if (num > maxNumeroId) maxNumeroId = num;
+        }
+        filasValidas.push(filaCopia);
       }
     }
   }
 
+  // Normalizar cualquier ID que tuviera el formato antiguo "HAB-..." o estuviera vacío al formato "H01", "H06"...
+  filasValidas.forEach((f) => {
+    const idStr = String(f[0] || '').trim();
+    if (!/^H\d+$/i.test(idStr)) {
+      maxNumeroId++;
+      f[0] = `H${String(maxNumeroId).padStart(2, '0')}`;
+    }
+  });
+
   const yaExistia = filasValidas.some(f => normalizarTexto_(String(f[1])) === norm);
   if (!yaExistia) {
-    const nuevoId = `HAB-${String(filasValidas.length + 1).padStart(3, '0')}`;
+    maxNumeroId++;
+    const nuevoId = `H${String(maxNumeroId).padStart(2, '0')}`;
     filasValidas.push([
       nuevoId,
       nombre,
@@ -1116,7 +1137,7 @@ function obtenerEstadoDashboard() {
 
       plantillasCatalogo.push({
         idFila: i + 1,
-        idCodigo: String(pData[i][0] || `HAB-${i}`),
+        idCodigo: String(pData[i][0] || `H${String(i).padStart(2, '0')}`),
         nombre: nombreHab,
         categoria: String(pData[i][2] || 'General'),
         frecuencia: String(pData[i][3] || 'Diaria'),
