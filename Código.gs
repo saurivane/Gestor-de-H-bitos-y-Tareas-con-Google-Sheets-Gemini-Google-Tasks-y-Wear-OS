@@ -15,6 +15,9 @@ const CONFIG = {
     REGISTRO: 'Registro_Diario',
     DASHBOARD: 'Dashboard'
   },
+  CATEGORIAS: ['Salud', 'Estudio', 'Hogar', 'Mantenimiento', 'Finanzas', 'General'],
+  FRECUENCIAS: ['Diaria', 'L-V', 'Fin de semana', 'Semanal'],
+  ESTADOS: ['Pendiente', 'Completado'],
   TASKS_LIST_NAME: 'Hábitos',
   GEMINI_MODEL: 'gemini-2.5-flash',
   TIMEZONE: Session.getScriptTimeZone() || 'Europe/Madrid'
@@ -764,6 +767,7 @@ function generarHabitosDelDia() {
       sheetRegistro
         .getRange(ultimaConNombre + 1, 1, nuevasFilas.length, nuevasFilas[0].length)
         .setValues(nuevasFilas);
+      aplicarValidacionesRegistro_(sheetRegistro, ultimaConNombre + 1, nuevasFilas.length);
       SpreadsheetApp.flush();
     }
 
@@ -947,13 +951,71 @@ function asegurarEnPlantillasHabitos_(sheetPlantillas, nombre, categoria, frecue
     ]);
   }
 
-  // Limpiar contenido antiguo desde fila 2 y escribir todas las plantillas seguidas sin huecos
-  if (datos.length > 1) {
-    sheetPlantillas.getRange(2, 1, datos.length - 1, 6).clearContent();
+  // Limpiar contenido y validaciones huérfanas antiguas desde fila 2 y escribir todas las plantillas seguidas sin huecos
+  const maxFilasHoja = Math.max(datos.length, filasValidas.length + 1);
+  if (maxFilasHoja > 1) {
+    const rangoTotal = sheetPlantillas.getRange(2, 1, maxFilasHoja - 1, 6);
+    rangoTotal.clearContent();
+    rangoTotal.clearDataValidations();
   }
+
   if (filasValidas.length > 0) {
     sheetPlantillas.getRange(2, 1, filasValidas.length, 6).setValues(filasValidas);
+    aplicarValidacionesPlantillas_(sheetPlantillas, filasValidas.length);
   }
+}
+
+/**
+ * Aplica automáticamente los desplegables de Categoría, Frecuencia y casilla Activo en Plantillas_Habitos
+ */
+function aplicarValidacionesPlantillas_(sheetPlantillas, numFilasDatos) {
+  if (!sheetPlantillas || numFilasDatos <= 0) return;
+
+  const ruleCategoria = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CONFIG.CATEGORIAS, true)
+    .setAllowInvalid(true)
+    .build();
+
+  const ruleFrecuencia = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CONFIG.FRECUENCIAS, true)
+    .setAllowInvalid(true)
+    .build();
+
+  const ruleCheckbox = SpreadsheetApp.newDataValidation()
+    .requireCheckbox()
+    .build();
+
+  // Columna C (3): Categoría | Columna D (4): Frecuencia | Columna F (6): Activo
+  sheetPlantillas.getRange(2, 3, numFilasDatos, 1).setDataValidation(ruleCategoria);
+  sheetPlantillas.getRange(2, 4, numFilasDatos, 1).setDataValidation(ruleFrecuencia);
+  sheetPlantillas.getRange(2, 6, numFilasDatos, 1).setDataValidation(ruleCheckbox);
+}
+
+/**
+ * Aplica automáticamente los desplegables de Tipo, Categoría y Estado en una o varias filas de Registro_Diario
+ */
+function aplicarValidacionesRegistro_(sheetRegistro, filaInicio, numFilas) {
+  if (!sheetRegistro || numFilas <= 0) return;
+
+  const ruleTipo = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Hábito', 'Tarea'], true)
+    .setAllowInvalid(true)
+    .build();
+
+  const ruleCategoria = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CONFIG.CATEGORIAS, true)
+    .setAllowInvalid(true)
+    .build();
+
+  const ruleEstado = SpreadsheetApp.newDataValidation()
+    .requireValueInList(CONFIG.ESTADOS, true)
+    .setAllowInvalid(true)
+    .build();
+
+  // Columna B (2): Tipo | Columna D (4): Categoría | Columna E (5): Estado
+  sheetRegistro.getRange(filaInicio, 2, numFilas, 1).setDataValidation(ruleTipo);
+  sheetRegistro.getRange(filaInicio, 4, numFilas, 1).setDataValidation(ruleCategoria);
+  sheetRegistro.getRange(filaInicio, 5, numFilas, 1).setDataValidation(ruleEstado);
 }
 
 /**
@@ -1209,6 +1271,9 @@ function insertarEnPrimeraFilaLibre_(sheet, valoresFila, colClaveIndex) {
 
   const filaDestino = ultimaOcupada + 1;
   sheet.getRange(filaDestino, 1, 1, valoresFila.length).setValues([valoresFila]);
+  if (valoresFila.length === 6 && (valoresFila[1] === 'Hábito' || valoresFila[1] === 'Tarea')) {
+    aplicarValidacionesRegistro_(sheet, filaDestino, 1);
+  }
   return filaDestino;
 }
 
