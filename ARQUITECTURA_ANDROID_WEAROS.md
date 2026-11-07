@@ -1,4 +1,4 @@
-# Arquitectura de Integración: Google Sheets + Gemini 2.5 Flash + Android / Wear OS
+# Arquitectura de Integración: Google Sheets + Gemini + Android / Wear OS
 
 Este documento detalla la especificación técnica para conectar la hoja de cálculo **"Gestor de Tareas y Hábitos"** con clientes móviles Android, relojes Wear OS y agentes mediante la Web App de Google Apps Script ([`Código.gs`](./Código.gs)) como pasarela Serverless segura.
 
@@ -12,7 +12,7 @@ sequenceDiagram
     actor Usuario as Usuario (Voz / Toque)
     participant WearApp as Wear OS Tile / Android Widget
     participant GAS as Apps Script Web App (doPost / doGet)
-    participant Gemini as Gemini API (gemini-2.5-flash)
+    participant Gemini as Gemini API
     participant Sheets as Google Sheets (3 Pestañas)
 
     Usuario->>WearApp: Dicta voz: "He terminado de entrenar"

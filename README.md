@@ -1,6 +1,6 @@
 # ⚡ Gestor Inteligente de Tareas y Hábitos (Google Sheets + Gemini API + Google Tasks + Wear OS)
 
-Sistema **Serverless y 100% gratuito** construido sobre el ecosistema de Google (**Google Sheets**, **Google Apps Script**, **Google Tasks API** y **Gemini 2.5 Flash**) para gestionar hábitos recurrentes y tareas diarias mediante:
+Sistema **Serverless y 100% gratuito** construido sobre el ecosistema de Google (**Google Sheets**, **Google Apps Script**, **Google Tasks API** y **Gemini**) para gestionar hábitos recurrentes y tareas diarias mediante:
 1. **Comandos de voz en lenguaje natural** desde el móvil Android o reloj **Wear OS** (a través del asistente Gemini / Google Tasks).
 2. **Interfaz Web Progresiva (PWA) con CRUD completo** en modo oscuro y **Modo Reloj AMOLED** integrado.
 3. **Automatización nocturna** que genera cada madrugada los hábitos que tocan según su frecuencia (`Diaria`, `L-V`, `Fin de semana`, `Semanal`).
@@ -9,7 +9,7 @@ Sistema **Serverless y 100% gratuito** construido sobre el ecosistema de Google 
 
 ## ✨ Características Principales
 
-* 🧠 **Motor NLU con Gemini 2.5 Flash:** Convierte frases naturales (ej. *"Ya he terminado de entrenar"*, *"Añade hábito diario meditar 10 minutos"*, *"Comprar pilas"*) en órdenes estructuradas JSON (`CREAR`, `COMPLETAR`, `BORRAR`, `CONSULTAR`) clasificadas automáticamente por categoría (`Salud`, `Estudio`, `Hogar`, `Mantenimiento`, `Finanzas`, `Trabajo`).
+* 🧠 **Motor NLU con Gemini:** Convierte frases naturales (ej. *"Ya he terminado de entrenar"*, *"Añade hábito diario meditar 10 minutos"*, *"Comprar pilas"*) en órdenes estructuradas JSON (`CREAR`, `COMPLETAR`, `BORRAR`, `CONSULTAR`) clasificadas automáticamente por categoría (`Salud`, `Estudio`, `Hogar`, `Mantenimiento`, `Finanzas`, `Trabajo`).
 * 🔄 **Sincronización Bidireccional con Google Tasks:**
   * Publica automáticamente tus hábitos y tareas pendientes del día en una lista dedicada (`"Hábitos"`) en Google Tasks.
   * Al marcar el check `✓` desde el widget de Google Tasks en tu teléfono o reloj (o al pedírselo por voz al asistente), el script actualiza el estado a `Completado` con marca de tiempo (`YYYY-MM-DD HH:mm:ss`) en tu hoja de cálculo.
@@ -37,7 +37,7 @@ flowchart LR
     subgraph GoogleCloud["☁️ Ecosistema Google (Serverless)"]
         TasksAPI["📋 Google Tasks API (Lista 'Hábitos')"]
         GAS["⚙️ Google Apps Script (Código.gs)"]
-        Gemini["✨ Gemini 2.5 Flash API"]
+        Gemini["✨ Gemini API"]
         Sheets[("📊 Google Sheets (3 Pestañas)")]
     end
 
@@ -162,7 +162,7 @@ Para que el script pueda sincronizarse con la app **Google Tasks** de tu móvil 
 
 ## 📁 Estructura del Repositorio
 
-* [`Código.gs`](./Código.gs): Código fuente completo de Google Apps Script (Menú en Sheets, cliente Gemini 2.5 Flash con JSON Schema, sincronización bidireccional con Google Tasks, triggers automáticos y Web App HTML/CSS/JS con CRUD y modo reloj).
+* [`Código.gs`](./Código.gs): Código fuente completo de Google Apps Script (Menú en Sheets, cliente Gemini con JSON Schema, sincronización bidireccional con Google Tasks, triggers automáticos y Web App HTML/CSS/JS con CRUD y modo reloj).
 * [`ARQUITECTURA_ANDROID_WEAROS.md`](./ARQUITECTURA_ANDROID_WEAROS.md): Documentación técnica del contrato de red HTTP (`doPost` / `doGet`), estructura de payloads JSON y ejemplo de cliente en Kotlin (`OkHttp` + `Coroutines`) para desarrolladores que deseen compilar un Widget nativo en Android Studio o un Tile en Wear OS.
 
 ---

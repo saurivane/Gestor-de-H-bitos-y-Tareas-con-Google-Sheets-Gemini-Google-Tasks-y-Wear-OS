@@ -1391,7 +1391,7 @@ function formatearEtiquetaMes_(claveMes) {
 
 /**
  * Crea o actualiza en la pestaña "Dashboard" de Google Sheets una tabla formateada
- * con el KPI de Completados por Meses sin pisar las tablas ni gráficos que ya tenga el usuario.
+ * con el KPI de Completados por Meses sin pisar las tablas ni quedar oculta detrás de los gráficos flotantes.
  */
 function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
   if (!sheetDashboard || !listaPorMes || listaPorMes.length === 0) return;
@@ -1401,29 +1401,62 @@ function sincronizarTablaMensualEnHojaDashboard_(sheetDashboard, listaPorMes) {
   const maxCols = Math.max(sheetDashboard.getLastColumn(), 1);
   const valores = sheetDashboard.getRange(1, 1, maxRows, maxCols).getValues();
 
-  let filaInicio = -1;
-  let colInicio = -1;
+  // 1. Detectar dónde acaban las celdas previas y dónde acaban los gráficos flotantes (EmbeddedCharts)
+  let ultimaFilaCeldasNoTabla = 1;
+  let filaTablaPrevia = -1;
+  let colTablaPrevia = -1;
 
-  // 1. Buscar si la tabla ya existe en la hoja Dashboard
   for (let r = 0; r < valores.length; r++) {
     for (let c = 0; c < valores[r].length; c++) {
-      if (String(valores[r][c] || '').trim() === tituloSeccion) {
-        filaInicio = r + 1;
-        colInicio = c + 1;
-        break;
+      const txt = String(valores[r][c] || '').trim();
+      if (txt === tituloSeccion) {
+        filaTablaPrevia = r + 1;
+        colTablaPrevia = c + 1;
+      } else if (txt !== '' && (filaTablaPrevia === -1 || r + 1 < filaTablaPrevia)) {
+        if (r + 1 > ultimaFilaCeldasNoTabla) ultimaFilaCeldasNoTabla = r + 1;
       }
     }
-    if (filaInicio !== -1) break;
   }
 
-  // 2. Si aún no existe, colocarla debajo del contenido actual (en columna A) dejando 2 filas de margen
-  if (filaInicio === -1) {
-    filaInicio = sheetDashboard.getLastRow() > 0 ? sheetDashboard.getLastRow() + 3 : 2;
+  // Calcular la fila inferior que alcanzan los gráficos flotantes en la hoja Dashboard
+  let maxFilaOcupadaPorGraficos = 0;
+  try {
+    const charts = sheetDashboard.getCharts();
+    charts.forEach(ch => {
+      const info = ch.getContainerInfo();
+      if (info) {
+        const anchorRow = info.getAnchorRow() || 1;
+        const heightPx = (ch.getOptions() && ch.getOptions().get('height')) ? Number(ch.getOptions().get('height')) : 380;
+        const filasAproxGrafico = Math.ceil(heightPx / 21) + 2;
+        const finGrafico = anchorRow + filasAproxGrafico;
+        if (finGrafico > maxFilaOcupadaPorGraficos) {
+          maxFilaOcupadaPorGraficos = finGrafico;
+        }
+      }
+    });
+  } catch (e) {}
+
+  const filaMinimaSegura = Math.max(ultimaFilaCeldasNoTabla + 3, maxFilaOcupadaPorGraficos + 2);
+
+  // Si la tabla existía antes pero estaba metida debajo de un gráfico (fila < filaMinimaSegura), la limpiamos de ahí y la bajamos
+  let filaInicio = filaTablaPrevia;
+  let colInicio = colTablaPrevia !== -1 ? colTablaPrevia : 1;
+
+  if (filaTablaPrevia !== -1 && filaTablaPrevia < filaMinimaSegura) {
+    const rangoAntiguo = sheetDashboard.getRange(filaTablaPrevia, colInicio, 27, 5);
+    rangoAntiguo.breakApart();
+    rangoAntiguo.clearContent();
+    rangoAntiguo.clearFormat();
+    filaInicio = filaMinimaSegura;
+    colInicio = 1;
+  } else if (filaInicio === -1) {
+    filaInicio = filaMinimaSegura;
     colInicio = 1;
   }
 
   // Limpiar área previa de la tabla mensual (hasta 24 meses) para evitar restos antiguos
   const rangoLimpieza = sheetDashboard.getRange(filaInicio, colInicio, 27, 5);
+  rangoLimpieza.breakApart();
   rangoLimpieza.clearContent();
   rangoLimpieza.clearFormat();
 
