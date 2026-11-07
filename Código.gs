@@ -19,7 +19,13 @@ const CONFIG = {
   FRECUENCIAS: ['Diaria', 'L-V', 'Fin de semana', 'Semanal'],
   ESTADOS: ['Pendiente', 'Completado'],
   TASKS_LIST_NAME: 'Hábitos',
-  GEMINI_MODEL: 'gemini-3.8-flash',
+  GEMINI_MODELS: [
+    'gemini-3.5-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-3.8-flash',
+    'gemini-4-argon',
+    'gemini-3.1-flash-lite'
+  ],
   TIMEZONE: Session.getScriptTimeZone() || 'Europe/Madrid'
 };
 
@@ -187,8 +193,6 @@ Reglas de negocio:
 4. "categoria": clasifica semánticamente en una de las 6 categorías permitidas ("Salud", "Estudio", "Hogar", "Mantenimiento", "Finanzas", "Trabajo").
 5. ${contextoHoy}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
-
   const payload = {
     systemInstruction: {
       parts: [{ text: systemInstructionText }]
@@ -237,22 +241,30 @@ Reglas de negocio:
     muteHttpExceptions: true
   };
 
-  const response = UrlFetchApp.fetch(url, options);
-  const statusCode = response.getResponseCode();
-  const responseText = response.getContentText();
+  let ultimoError = '';
+  for (let m = 0; m < CONFIG.GEMINI_MODELS.length; m++) {
+    const modelName = CONFIG.GEMINI_MODELS[m];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
-  if (statusCode !== 200) {
-    throw new Error(`Error Gemini API (HTTP ${statusCode}): ${responseText}`);
+    const response = UrlFetchApp.fetch(url, options);
+    const statusCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    if (statusCode === 200) {
+      const jsonResponse = JSON.parse(responseText);
+      const rawContent = jsonResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (rawContent) {
+        return JSON.parse(rawContent);
+      }
+    }
+
+    ultimoError = `HTTP ${statusCode} (${modelName}): ${responseText}`;
+    if (statusCode === 400 || statusCode === 403) {
+      break;
+    }
   }
 
-  const jsonResponse = JSON.parse(responseText);
-  const rawContent = jsonResponse?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!rawContent) {
-    throw new Error('Gemini no devolvió un contenido JSON válido.');
-  }
-
-  return JSON.parse(rawContent);
+  throw new Error(`Error Gemini API (${ultimoError})`);
 }
 
 /**
