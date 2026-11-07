@@ -1211,9 +1211,61 @@ function obtenerEstadoDashboard() {
 
   let snapshotDashboardSheet = [];
   if (sheetDashboard && sheetDashboard.getLastRow() > 0 && sheetDashboard.getLastColumn() > 0) {
-    const maxRows = Math.min(sheetDashboard.getLastRow(), 25);
-    const maxCols = Math.min(sheetDashboard.getLastColumn(), 8);
+    const maxRows = Math.min(sheetDashboard.getLastRow(), 40);
+    const maxCols = Math.min(sheetDashboard.getLastColumn(), 10);
     snapshotDashboardSheet = sheetDashboard.getRange(1, 1, maxRows, maxCols).getDisplayValues();
+  }
+
+  // Calcular resumen histórico de los últimos 7 días y por categoría desde Registro_Diario
+  const hace7Dias = new Date();
+  hace7Dias.setDate(hace7Dias.getDate() - 6);
+  const hace7DiasStr = obtenerFechaHoyStr_(hace7Dias);
+
+  let total7Dias = 0;
+  let completados7Dias = 0;
+  let totalHistorico = 0;
+  let completadosHistorico = 0;
+  const historicoPorCategoria = {};
+
+  CONFIG.CATEGORIAS.forEach(cat => {
+    historicoPorCategoria[cat] = { total: 0, completados: 0, porcentaje: 0 };
+  });
+
+  for (let i = 1; i < data.length; i++) {
+    const fechaFila = formatearCeldaFecha_(data[i][0]);
+    const nombreFila = String(data[i][2] || '').trim();
+    if (!fechaFila || !nombreFila) continue;
+
+    const catFila = String(data[i][3] || 'Hogar').trim();
+    const esCompletado = String(data[i][4] || '').trim().toLowerCase() === 'completado';
+
+    totalHistorico++;
+    if (esCompletado) completadosHistorico++;
+
+    if (fechaFila >= hace7DiasStr && fechaFila <= hoyStr) {
+      total7Dias++;
+      if (esCompletado) completados7Dias++;
+    }
+
+    if (!historicoPorCategoria[catFila]) {
+      historicoPorCategoria[catFila] = { total: 0, completados: 0, porcentaje: 0 };
+    }
+    historicoPorCategoria[catFila].total++;
+    if (esCompletado) historicoPorCategoria[catFila].completados++;
+  }
+
+  Object.keys(historicoPorCategoria).forEach(cat => {
+    const itemCat = historicoPorCategoria[cat];
+    itemCat.porcentaje = itemCat.total > 0 ? Math.round((itemCat.completados / itemCat.total) * 100) : 0;
+  });
+
+  const porcentaje7Dias = total7Dias > 0 ? Math.round((completados7Dias / total7Dias) * 100) : 0;
+  const porcentajeHistorico = totalHistorico > 0 ? Math.round((completadosHistorico / totalHistorico) * 100) : 0;
+
+  // URL privada dinámica hacia la pestaña Dashboard de Google Sheets (sin exponer IDs fijos en el código fuente)
+  let sheetDashboardUrl = ss.getUrl();
+  if (sheetDashboard) {
+    sheetDashboardUrl += `#gid=${sheetDashboard.getSheetId()}`;
   }
 
   return {
@@ -1228,8 +1280,22 @@ function obtenerEstadoDashboard() {
       completadosLista: completadosListaHoy,
       porCategoria: porCategoria
     },
+    resumenGlobal: {
+      semana: {
+        total: total7Dias,
+        completados: completados7Dias,
+        porcentaje: porcentaje7Dias
+      },
+      historico: {
+        total: totalHistorico,
+        completados: completadosHistorico,
+        porcentaje: porcentajeHistorico
+      },
+      porCategoria: historicoPorCategoria
+    },
     plantillas: plantillasCatalogo,
-    vistaDashboard: snapshotDashboardSheet
+    vistaDashboard: snapshotDashboardSheet,
+    sheetDashboardUrl: sheetDashboardUrl
   };
 }
 
@@ -1567,6 +1633,107 @@ function obtenerHtmlApp_() {
     }
     .toast.show { transform: translateX(-50%) translateY(0); }
 
+    /* DASHBOARD TAB STYLES */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .kpi-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 14px 10px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+    .kpi-val {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--cat-pct);
+    }
+    .kpi-lbl {
+      font-size: 0.68rem;
+      color: var(--muted);
+      font-weight: 700;
+      margin-top: 4px;
+      text-transform: uppercase;
+    }
+    .kpi-sub {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .cat-bar-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .cat-bar-row {
+      margin-bottom: 12px;
+    }
+    .cat-bar-row:last-child { margin-bottom: 0; }
+    .cat-bar-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+    .cat-bar-track {
+      width: 100%;
+      height: 8px;
+      background: var(--ring-track);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .cat-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      border-radius: 99px;
+      transition: width 0.5s ease;
+    }
+    .sheet-link-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 13px 16px;
+      margin-bottom: 16px;
+      border-radius: 16px;
+      background: var(--sync-pill-bg);
+      color: var(--sync-pill-text);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      font-weight: 700;
+      font-size: 0.85rem;
+      text-decoration: none;
+      transition: transform 0.15s ease;
+    }
+    .sheet-link-btn:active { transform: scale(0.98); }
+    .sheet-table-wrap {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 12px;
+      overflow-x: auto;
+    }
+    .sheet-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.76rem;
+    }
+    .sheet-table td {
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--card-border);
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .sheet-table tr:last-child td { border-bottom: none; }
+
     /* MODO RELOJ WEAR OS */
     body.watch-mode { background: #000000 !important; color: #F8FAFC !important; padding: 10px 8px 36px; }
     body.watch-mode .container { max-width: 230px; text-align: center; }
@@ -1596,10 +1763,11 @@ function obtenerHtmlApp_() {
       </div>
     </div>
 
-    <!-- PESTAÑAS DE NAVEGACIÓN (HOY vs CATÁLOGO DE HÁBITOS) -->
+    <!-- PESTAÑAS DE NAVEGACIÓN (HOY vs CATÁLOGO vs DASHBOARD) -->
     <div class="nav-tabs">
       <button class="tab-btn active" id="tabHoyBtn" onclick="cambiarTab('hoy')">📅 Hoy (<span id="tabHoyCount">0</span>)</button>
-      <button class="tab-btn" id="tabPlantillasBtn" onclick="cambiarTab('plantillas')">⚙️ Catálogo Hábitos (<span id="tabPlantillasCount">0</span>)</button>
+      <button class="tab-btn" id="tabPlantillasBtn" onclick="cambiarTab('plantillas')">⚙️ Hábitos (<span id="tabPlantillasCount">0</span>)</button>
+      <button class="tab-btn" id="tabDashboardBtn" onclick="cambiarTab('dashboard')">📊 Dashboard</button>
     </div>
 
     <!-- ==================== VISTA 1: HOY ==================== -->
@@ -1652,6 +1820,44 @@ function obtenerHtmlApp_() {
         <span>📋 Tus Hábitos Recurrentes (Plantillas_Habitos)</span>
       </div>
       <div class="task-list" id="plantillasList"></div>
+    </div>
+
+    <!-- ==================== VISTA 3: DASHBOARD Y MÉTRICAS ==================== -->
+    <div id="vistaDashboard" style="display: none;">
+      <a href="#" target="_blank" rel="noopener noreferrer" class="sheet-link-btn" id="openSheetDashboardBtn">
+        <span>↗️ Abrir pestaña Dashboard en Google Sheets</span>
+      </a>
+
+      <div class="section-title">
+        <span>📈 Resumen de Cumplimiento</span>
+      </div>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-val" id="kpiHoyPct">0%</div>
+          <div class="kpi-lbl">Hoy</div>
+          <div class="kpi-sub" id="kpiHoySub">0/0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-val" id="kpiSemanaPct">0%</div>
+          <div class="kpi-lbl">Últ. 7 Días</div>
+          <div class="kpi-sub" id="kpiSemanaSub">0/0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-val" id="kpiTotalPct">0%</div>
+          <div class="kpi-lbl">Histórico</div>
+          <div class="kpi-sub" id="kpiTotalSub">0/0</div>
+        </div>
+      </div>
+
+      <div class="section-title">
+        <span>🏷️ Cumplimiento Histórico por Categoría</span>
+      </div>
+      <div class="cat-bar-card" id="dashboardCatsBars"></div>
+
+      <div class="section-title">
+        <span>📋 Vista en vivo de tu pestaña "Dashboard"</span>
+      </div>
+      <div class="sheet-table-wrap" id="dashboardRawTable"></div>
     </div>
   </div>
 
@@ -1778,8 +1984,10 @@ function obtenerHtmlApp_() {
       tabActual = tab;
       document.getElementById('tabHoyBtn').classList.toggle('active', tab === 'hoy');
       document.getElementById('tabPlantillasBtn').classList.toggle('active', tab === 'plantillas');
+      document.getElementById('tabDashboardBtn').classList.toggle('active', tab === 'dashboard');
       document.getElementById('vistaHoy').style.display = tab === 'hoy' ? 'block' : 'none';
       document.getElementById('vistaPlantillas').style.display = tab === 'plantillas' ? 'block' : 'none';
+      document.getElementById('vistaDashboard').style.display = tab === 'dashboard' ? 'block' : 'none';
     }
 
     function mostrarToast(texto) {
@@ -1846,6 +2054,72 @@ function obtenerHtmlApp_() {
         plantList.innerHTML = '<div style="color:var(--muted);font-size:0.85rem;text-align:center;padding:14px;">No hay hábitos en Plantillas_Habitos.</div>';
       } else {
         plantillas.forEach(p => plantList.appendChild(crearFilaPlantilla(p)));
+      }
+
+      // ==================== ACTUALIZAR PESTAÑA DASHBOARD ====================
+      if (dashboard.sheetDashboardUrl) {
+        document.getElementById('openSheetDashboardBtn').href = dashboard.sheetDashboardUrl;
+      }
+
+      document.getElementById('kpiHoyPct').textContent = \`\${h.porcentajeCumplimiento}%\`;
+      document.getElementById('kpiHoySub').textContent = \`\${h.completados}/\${h.total}\`;
+
+      if (dashboard.resumenGlobal) {
+        const sem = dashboard.resumenGlobal.semana || { porcentaje: 0, completados: 0, total: 0 };
+        const hist = dashboard.resumenGlobal.historico || { porcentaje: 0, completados: 0, total: 0 };
+        document.getElementById('kpiSemanaPct').textContent = \`\${sem.porcentaje}%\`;
+        document.getElementById('kpiSemanaSub').textContent = \`\${sem.completados}/\${sem.total}\`;
+        document.getElementById('kpiTotalPct').textContent = \`\${hist.porcentaje}%\`;
+        document.getElementById('kpiTotalSub').textContent = \`\${hist.completados}/\${hist.total}\`;
+
+        const barsCont = document.getElementById('dashboardCatsBars');
+        barsCont.innerHTML = '';
+        const catsHist = dashboard.resumenGlobal.porCategoria || {};
+        Object.keys(catsHist).forEach(cat => {
+          const itemC = catsHist[cat];
+          const rowDiv = document.createElement('div');
+          rowDiv.className = 'cat-bar-row';
+          rowDiv.innerHTML = \`
+            <div class="cat-bar-header">
+              <span>\${cat}</span>
+              <span style="color:var(--muted);">\${itemC.completados}/\${itemC.total} (\${itemC.porcentaje}%)</span>
+            </div>
+            <div class="cat-bar-track">
+              <div class="cat-bar-fill" style="width: \${itemC.porcentaje}%"></div>
+            </div>
+          \`;
+          barsCont.appendChild(rowDiv);
+        });
+      }
+
+      // Renderizar tabla en vivo de las celdas de la pestaña "Dashboard" de Google Sheets
+      const rawTableWrap = document.getElementById('dashboardRawTable');
+      rawTableWrap.innerHTML = '';
+      const matriz = dashboard.vistaDashboard || [];
+      const filasConDatos = matriz.filter(fila => fila.some(celda => String(celda || '').trim() !== ''));
+
+      if (filasConDatos.length === 0) {
+        rawTableWrap.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;text-align:center;padding:10px;">La pestaña Dashboard no contiene celdas de texto adicionales.</div>';
+      } else {
+        const table = document.createElement('table');
+        table.className = 'sheet-table';
+        filasConDatos.forEach(fila => {
+          // Recortar columnas vacías al final de cada fila
+          let ultimoIndiceNoVacio = -1;
+          fila.forEach((celda, idx) => {
+            if (String(celda || '').trim() !== '') ultimoIndiceNoVacio = idx;
+          });
+          if (ultimoIndiceNoVacio === -1) return;
+
+          const tr = document.createElement('tr');
+          for (let c = 0; c <= ultimoIndiceNoVacio; c++) {
+            const td = document.createElement('td');
+            td.textContent = fila[c] || '';
+            tr.appendChild(td);
+          }
+          table.appendChild(tr);
+        });
+        rawTableWrap.appendChild(table);
       }
     }
 

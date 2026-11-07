@@ -17,7 +17,8 @@ Sistema **Serverless y 100% gratuito** construido sobre el ecosistema de Google 
 * 📱⌚ **Web App Adaptativa con CRUD Completo y Selector de Tema (`Dark` / `Light` / `System`):**
   * **Selector de visualización (`🌙 Oscuro` / `☀️ Claro` / `🖥️ Auto`):** Botón en la barra superior que alterna entre modo oscuro, modo claro y detección automática del tema del sistema operativo (`prefers-color-scheme`), recordando tu preferencia en el dispositivo.
   * **Pestaña `📅 Hoy`:** Anillo de progreso circular en vivo, progreso por categorías y lista interactiva para completar, reabrir, editar (`✏️`) o eliminar (`🗑️`) registros del día.
-  * **Pestaña `⚙️ Catálogo Hábitos`:** Gestión directa de la hoja `Plantillas_Habitos` para crear nuevos hábitos recurrentes, editar su frecuencia/categoría, pausarlos temporalmente (`Activo` / `Pausado`) o eliminarlos.
+  * **Pestaña `⚙️ Hábitos`:** Gestión directa de la hoja `Plantillas_Habitos` para crear nuevos hábitos recurrentes, editar su frecuencia/categoría, pausarlos temporalmente (`Activo` / `Pausado`) o eliminarlos.
+  * **Pestaña `📊 Dashboard`:** Panel de métricas integrado con KPIs de cumplimiento (Hoy, Últimos 7 días e Histórico), barras de progreso por categoría, vista en vivo de las celdas de tu hoja `Dashboard` y botón directo para abrir la pestaña `Dashboard` en Google Sheets (generado dinámicamente sin exponer URLs en el código).
   * **Modo Reloj (`?view=watch`):** Interfaz minimalista con fondo negro puro AMOLED optimizada para pantallas redondas o cuadradas de relojes inteligentes.
 * 🔌 **API JSON / Webhook (`doPost` y `doGet`):** Preparada para integrarse con clientes nativos en Kotlin (Android Widgets / Wear OS Tiles) o herramientas de automatización.
 
