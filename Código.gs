@@ -47,7 +47,7 @@ function configurarPrefijoAsistente() {
   const res = ui.prompt(
     '🎙️ Configurar alias de Asistente de Voz',
     `Introduce el nombre o alias de tu asistente personalizado en Gemini${actual ? ` (Actual: "${actual}")` : ''}:\n\n` +
-    'Si configuras una regla en "Información guardada" de Gemini para que anteponga [TuAlias] al crear tareas en Google Tasks, el script las detectará automáticamente en cualquier lista de Google Tasks, las procesará y las moverá limpias a tu lista "Hábitos".\n' +
+    'Si configuras una regla en "Contexto personal" de Gemini para que anteponga [TuAlias] al crear tareas en Google Tasks, el script las detectará automáticamente en cualquier lista de Google Tasks, las procesará y las moverá limpias a tu lista "Hábitos".\n' +
     '(Déjalo en blanco si quieres desactivar el filtro por alias).',
     ui.ButtonSet.OK_CANCEL
   );

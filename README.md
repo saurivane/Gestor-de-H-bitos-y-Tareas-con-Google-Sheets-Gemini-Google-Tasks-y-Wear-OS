@@ -163,7 +163,7 @@ Para que el script pueda sincronizarse con la app **Google Tasks** de tu móvil 
 Si prefieres dirigirte a Gemini con un nombre o alias propio (por ejemplo, *"Asistente, añade hábito..."*) sin tener que pronunciar *"en Google Tasks"* ni depender de qué lista tengas en primera posición:
 
 1. En tu hoja de Google Sheets, abre el menú **`⚡ Mi Gestor` > `🎙️ Configurar alias de Asistente de Voz`** y escribe el alias que prefieras (se guarda de forma privada en `PropertiesService`).
-2. En la app de **Gemini** (*Foto de perfil > Información guardada* o en `gemini.google.com/saved-info`), añade una regla indicando que cuando uses ese alias para hábitos o tareas utilice siempre la extensión **`@Google Tasks`** y anteponga **`[TuAlias]`** al título de la tarea.
+2. En **Gemini**, entra en **Contexto personal** (*En móvil: Foto de perfil > Contexto personal*; *En web: ⚙️ Ajustes y ayuda > Contexto personal / Información guardada*, o simplemente pídele por chat a Gemini que lo guarde en tu memoria permanente) y añade una regla indicando que cuando uses ese alias para hábitos o tareas utilice siempre la extensión **`@Google Tasks`** y anteponga **`[TuAlias]`** al título de la tarea.
 3. El script detectará automáticamente cualquier tarea con el prefijo **`[TuAlias]`** en cualquiera de tus listas de Google Tasks, limpiará el prefijo, procesará la orden con IA y moverá la tarea limpia a tu lista **`"Hábitos"`**.
 
 ---
