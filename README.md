@@ -9,7 +9,7 @@ Sistema **Serverless y 100% gratuito** construido sobre el ecosistema de Google 
 
 ## ✨ Características Principales
 
-* 🧠 **Motor NLU con Gemini 2.5 Flash:** Convierte frases naturales (ej. *"Ya he terminado de entrenar"*, *"Añade hábito diario meditar 10 minutos"*, *"Comprar pilas"*) en órdenes estructuradas JSON (`CREAR`, `COMPLETAR`, `BORRAR`, `CONSULTAR`) clasificadas automáticamente por categoría (`Salud`, `Estudio`, `Hogar`, `Mantenimiento`, `Finanzas`, `General`).
+* 🧠 **Motor NLU con Gemini 2.5 Flash:** Convierte frases naturales (ej. *"Ya he terminado de entrenar"*, *"Añade hábito diario meditar 10 minutos"*, *"Comprar pilas"*) en órdenes estructuradas JSON (`CREAR`, `COMPLETAR`, `BORRAR`, `CONSULTAR`) clasificadas automáticamente por categoría (`Salud`, `Estudio`, `Hogar`, `Mantenimiento`, `Finanzas`, `Trabajo`).
 * 🔄 **Sincronización Bidireccional con Google Tasks:**
   * Publica automáticamente tus hábitos y tareas pendientes del día en una lista dedicada (`"Hábitos"`) en Google Tasks.
   * Al marcar el check `✓` desde el widget de Google Tasks en tu teléfono o reloj (o al pedírselo por voz al asistente), el script actualiza el estado a `Completado` con marca de tiempo (`YYYY-MM-DD HH:mm:ss`) en tu hoja de cálculo.

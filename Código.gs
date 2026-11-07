@@ -15,7 +15,7 @@ const CONFIG = {
     REGISTRO: 'Registro_Diario',
     DASHBOARD: 'Dashboard'
   },
-  CATEGORIAS: ['Salud', 'Estudio', 'Hogar', 'Mantenimiento', 'Finanzas', 'General'],
+  CATEGORIAS: ['Salud', 'Estudio', 'Hogar', 'Mantenimiento', 'Finanzas', 'Trabajo'],
   FRECUENCIAS: ['Diaria', 'L-V', 'Fin de semana', 'Semanal'],
   ESTADOS: ['Pendiente', 'Completado'],
   TASKS_LIST_NAME: 'Hábitos',
@@ -131,7 +131,7 @@ Analiza la orden del usuario y devuélvela estrictamente en formato JSON cumplie
   "accion": "CREAR" | "COMPLETAR" | "BORRAR" | "CONSULTAR",
   "tipo": "Hábito" | "Tarea",
   "nombre": "nombre limpio y conciso en infinitivo o sustantivo (con primera letra en mayúscula)",
-  "categoria": "Salud" | "Estudio" | "Hogar" | "Mantenimiento" | "Finanzas" | "General",
+  "categoria": "Salud" | "Estudio" | "Hogar" | "Mantenimiento" | "Finanzas" | "Trabajo",
   "frecuencia": "Diaria" | "L-V" | "Fin de semana" | "Semanal"
 }
 
@@ -145,7 +145,7 @@ Reglas de negocio:
    - "Hábito": acciones recurrentes de desarrollo personal, idiomas, salud, lectura, deporte, rutinas o si menciona palabras como "diario", "todos los días", "hábito", "semanal".
    - "Tarea": acciones puntuales, recados, compras, pagos o trámites.
 3. "nombre": limpia palabras de comando ("hecho", "completado", "añade") o frecuencias ("diario", "todos los días"). Si coincide semánticamente con uno de los elementos registrados hoy, usa EXACTAMENTE el nombre de la lista de hoy.
-4. "categoria": clasifica semánticamente en una de las 6 categorías permitidas ("Salud", "Estudio", "Hogar", "Mantenimiento", "Finanzas", "General").
+4. "categoria": clasifica semánticamente en una de las 6 categorías permitidas ("Salud", "Estudio", "Hogar", "Mantenimiento", "Finanzas", "Trabajo").
 5. ${contextoHoy}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
@@ -179,7 +179,7 @@ Reglas de negocio:
           },
           categoria: {
             type: 'STRING',
-            enum: ['Salud', 'Estudio', 'Hogar', 'Mantenimiento', 'Finanzas', 'General']
+            enum: ['Salud', 'Estudio', 'Hogar', 'Mantenimiento', 'Finanzas', 'Trabajo']
           },
           frecuencia: {
             type: 'STRING',
@@ -236,7 +236,7 @@ function ejecutarAccion(orden, opciones) {
     const accion = (orden.accion || '').toUpperCase();
     const tipo = orden.tipo || 'Tarea';
     const nombre = (orden.nombre || '').trim();
-    const categoria = orden.categoria || 'General';
+    const categoria = orden.categoria || 'Hogar';
     const frecuencia = orden.frecuencia || 'Diaria';
     const horaMomento = orden.horaMomento || 'Cualquier momento';
     const guardarEnPlantilla = orden.guardarEnPlantilla !== false; // Por defecto true si es Hábito
@@ -421,7 +421,7 @@ function gestionarPlantillaHabito(operacion) {
     const modo = (operacion.modo || '').toUpperCase();
     const idFila = Number(operacion.idFila);
     const nombre = (operacion.nombre || '').trim();
-    const categoria = (operacion.categoria || 'General').trim();
+    const categoria = (operacion.categoria || 'Hogar').trim();
     const frecuencia = (operacion.frecuencia || 'Diaria').trim();
     const horaMomento = (operacion.horaMomento || 'Cualquier momento').trim();
     const activo = operacion.activo !== undefined ? Boolean(operacion.activo) : true;
@@ -944,7 +944,7 @@ function asegurarEnPlantillasHabitos_(sheetPlantillas, nombre, categoria, frecue
     filasValidas.push([
       nuevoId,
       nombre,
-      categoria || 'General',
+      categoria || 'Hogar',
       frecuencia || 'Diaria',
       horaMomento || 'Cualquier momento',
       true
@@ -1689,7 +1689,7 @@ function obtenerHtmlApp_() {
           <option value="Hogar">Hogar</option>
           <option value="Mantenimiento">Mantenimiento</option>
           <option value="Finanzas">Finanzas</option>
-          <option value="General">General</option>
+          <option value="Trabajo">Trabajo</option>
         </select>
       </div>
 
@@ -1955,7 +1955,7 @@ function obtenerHtmlApp_() {
       document.getElementById('groupTipo').style.display = 'block';
       document.getElementById('formTipo').value = tabActual === 'plantillas' ? 'Hábito' : 'Tarea';
       document.getElementById('formNombre').value = '';
-      document.getElementById('formCategoria').value = 'General';
+      document.getElementById('formCategoria').value = 'Hogar';
       document.getElementById('formFrecuencia').value = 'Diaria';
       document.getElementById('formMomento').value = 'Cualquier momento';
       actualizarVisibilidadFrecuencia();
