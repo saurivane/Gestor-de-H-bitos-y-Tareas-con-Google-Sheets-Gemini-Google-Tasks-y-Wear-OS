@@ -668,7 +668,11 @@ function sincronizarBuzonGoogleTasks() {
 
       if (completadaEnDiaAnterior) {
         if (infoLista.esPrincipalHabitos || itemSheet || tienePrefijoAsistente) {
-          try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+          try {
+            Tasks.Tasks.remove(infoLista.id, t.id);
+          } catch (eRemove) {
+            Logger.log(`Aviso: No se pudo eliminar de la lista ${infoLista.title} (${t.id}): ${eRemove.message}`);
+          }
         }
         continue;
       }
@@ -680,7 +684,11 @@ function sincronizarBuzonGoogleTasks() {
             itemSheet.estado = 'Completado';
             detallesCambios.push(`✅ Completado hoy (detectado en lista secundaria): "${itemSheet.nombre}"`);
           }
-          try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+          try {
+            Tasks.Tasks.remove(infoLista.id, t.id);
+          } catch (eRemove) {
+            Logger.log(`Aviso: No se pudo eliminar de la lista ${infoLista.title} (${t.id}): ${eRemove.message}`);
+          }
         }
         continue;
       }
@@ -693,13 +701,25 @@ function sincronizarBuzonGoogleTasks() {
             itemSheet.estado = 'Completado';
             detallesCambios.push(`✅ Completado en Google Sheets: "${itemSheet.nombre}"`);
           }
-          try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+          try {
+            Tasks.Tasks.remove(infoLista.id, t.id);
+          } catch (eRemove) {
+            Logger.log(`Aviso: No se pudo eliminar de la lista ${infoLista.title} (${t.id}): ${eRemove.message}`);
+          }
         } else if (!estaCompletadaEnTasks) {
           if (itemSheet.estado.toLowerCase() === 'completado') {
-            try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+            try {
+            Tasks.Tasks.remove(infoLista.id, t.id);
+          } catch (eRemove) {
+            Logger.log(`Aviso: No se pudo eliminar de la lista ${infoLista.title} (${t.id}): ${eRemove.message}`);
+          }
           } else if (!infoLista.esPrincipalHabitos || tienePrefijoAsistente) {
             // Si entró en lista secundaria con prefijo o tenía prefijo en el título, eliminamos la versión con prefijo para que se republique limpia en "Hábitos"
-            try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+            try {
+            Tasks.Tasks.remove(infoLista.id, t.id);
+          } catch (eRemove) {
+            Logger.log(`Aviso: No se pudo eliminar de la lista ${infoLista.title} (${t.id}): ${eRemove.message}`);
+          }
           } else {
             nombresEnTasksPendientesHoy.add(itemSheet.nombreNorm);
           }
@@ -714,7 +734,11 @@ function sincronizarBuzonGoogleTasks() {
           const resAccion = ejecutarAccion(orden, { omitirSyncTasks: true });
           detallesCambios.push(`🤖 IA ("${titulo}") → ${resAccion.mensaje}`);
 
-          try { Tasks.Tasks.remove(infoLista.id, t.id); } catch (e) {}
+          try {
+            Tasks.Tasks.remove(infoLista.id, t.id);
+          } catch (eRemove) {
+            Logger.log(`Aviso: No se pudo eliminar de la lista ${infoLista.title} (${t.id}): ${eRemove.message}`);
+          }
 
           if (orden.accion === 'CREAR' && resAccion.filaAfectada) {
             itemsHoySheet.push({
