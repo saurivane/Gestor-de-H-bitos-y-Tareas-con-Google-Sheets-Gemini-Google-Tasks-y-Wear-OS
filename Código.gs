@@ -765,7 +765,8 @@ function sincronizarBuzonGoogleTasks() {
         Tasks.Tasks.insert(
           {
             title: itemSheet.nombre,
-            notes: `[${itemSheet.tipo} · ${itemSheet.categoria}] (${hoyStr})`
+            notes: `[${itemSheet.tipo} · ${itemSheet.categoria}] (${hoyStr})`,
+            due: construirDueDateRfc3339_(hoyStr)
           },
           targetListId
         );
@@ -814,18 +815,42 @@ function generarHabitosDelDia() {
 
     const datosRegistro = sheetRegistro.getDataRange().getValues();
     const existentesHoy = new Set();
+    const tareasPendientesPrevias = [];
 
     for (let i = 1; i < datosRegistro.length; i++) {
       const fechaFila = formatearCeldaFecha_(datosRegistro[i][0]);
-      const nombreFila = normalizarTexto_(String(datosRegistro[i][2]));
-      if (fechaFila === hoyStr && nombreFila) {
-        existentesHoy.add(nombreFila);
+      const tipoFila = String(datosRegistro[i][1] || 'Hábito').trim();
+      const nombreFila = String(datosRegistro[i][2] || '').trim();
+      const catFila = String(datosRegistro[i][3] || 'General').trim();
+      const estadoFila = String(datosRegistro[i][4] || 'Pendiente').trim().toLowerCase();
+      const nombreFilaNorm = normalizarTexto_(nombreFila);
+
+      if (fechaFila === hoyStr && nombreFilaNorm) {
+        existentesHoy.add(nombreFilaNorm);
+      }
+
+      // Si es una Tarea puntual de un día anterior que quedó Pendiente, la arrastramos automáticamente a hoy
+      if (fechaFila && fechaFila < hoyStr && tipoFila === 'Tarea' && estadoFila === 'pendiente' && nombreFilaNorm) {
+        tareasPendientesPrevias.push({
+          nombre: nombreFila,
+          nombreNorm: nombreFilaNorm,
+          categoria: catFila
+        });
       }
     }
 
     const datosPlantillas = sheetPlantillas.getDataRange().getValues();
     const nuevasFilas = [];
 
+    // 1. Arrastrar primero las Tareas puntuales pendientes de días previos (rollover)
+    tareasPendientesPrevias.forEach(tp => {
+      if (!existentesHoy.has(tp.nombreNorm)) {
+        nuevasFilas.push([hoyStr, 'Tarea', tp.nombre, tp.categoria, 'Pendiente', '']);
+        existentesHoy.add(tp.nombreNorm);
+      }
+    });
+
+    // 2. Volcar los Hábitos del catálogo que correspondan a la frecuencia del día de hoy
     for (let i = 1; i < datosPlantillas.length; i++) {
       const fila = datosPlantillas[i];
       const nombreHabito = String(fila[1] || '').trim();
@@ -960,16 +985,29 @@ function obtenerOCrearListaHabitosTasks_() {
   return listaHabitos;
 }
 
-function asegurarPendienteEnGoogleTasks_(nombre, tipo, categoria) {
+function construirDueDateRfc3339_(fechaStr) {
+  const f = fechaStr || obtenerFechaHoyStr_();
+  return `${f}T00:00:00.000Z`;
+}
+
+function asegurarPendienteEnGoogleTasks_(nombre, tipo, categoria, fechaStr) {
   try {
     if (typeof Tasks === 'undefined') return;
+    const fStr = fechaStr || obtenerFechaHoyStr_();
     const lista = obtenerOCrearListaHabitosTasks_();
     const res = Tasks.Tasks.list(lista.id, { showCompleted: false, maxResults: 100 });
     const items = res.items || [];
     const norm = normalizarTexto_(nombre);
     const yaExiste = items.some(t => normalizarTexto_(t.title) === norm);
     if (!yaExiste) {
-      Tasks.Tasks.insert({ title: nombre, notes: `[${tipo} · ${categoria}]` }, lista.id);
+      Tasks.Tasks.insert(
+        {
+          title: nombre,
+          notes: `[${tipo} · ${categoria}] (${fStr})`,
+          due: construirDueDateRfc3339_(fStr)
+        },
+        lista.id
+      );
     }
   } catch (e) {}
 }
